@@ -97,42 +97,110 @@ def get_faab_balance(query) -> int | None:
 # Transaction counting
 # ---------------------------------------------------------------------------
 
+def fetch_game_weeks(query) -> list[dict]:
+    """Fetch all fantasy week date ranges from Yahoo.
+
+    Uses ``get_game_weeks_by_game_id`` which returns exact start/end dates
+    for every fantasy week, including extended weeks (e.g. All-Star break).
+
+    Returns:
+        List of dicts with keys: week (int), start (date), end (date).
+        Empty list on failure.
+    """
+    try:
+        game_key = query.get_league_key().split(".")[0]
+        raw_weeks = query.get_game_weeks_by_game_id(int(game_key))
+        weeks = []
+        for gw in raw_weeks:
+            w = int(gw.week)
+            s = date.fromisoformat(str(gw.start))
+            e = date.fromisoformat(str(gw.end))
+            weeks.append({"week": w, "start": s, "end": e})
+        return weeks
+    except Exception as e:
+        print(f"  Warning: could not fetch game weeks: {e}")
+        return []
+
+
+def get_current_week_start(
+    game_weeks: list[dict] | None = None,
+    current_week: int | None = None,
+) -> date:
+    """Get the start date of the current fantasy week.
+
+    If Yahoo game-week data is available, uses the exact start date (which
+    may span 2 calendar weeks during All-Star break).  Otherwise falls back
+    to the most recent Monday.
+
+    Args:
+        game_weeks: List from :func:`fetch_game_weeks`.
+        current_week: Current fantasy week number (from league settings).
+
+    Returns:
+        The start date of the current fantasy week.
+    """
+    today = date.today()
+
+    if game_weeks and current_week is not None:
+        for gw in game_weeks:
+            if gw["week"] == current_week:
+                return gw["start"]
+
+    # Also try matching by date range (covers edge cases)
+    if game_weeks:
+        for gw in game_weeks:
+            if gw["start"] <= today <= gw["end"]:
+                return gw["start"]
+
+    # Fallback: most recent Monday
+    return today - timedelta(days=today.weekday())
+
+
 def count_transactions_this_week(
     transactions: list[dict],
     team_id: int | None = None,
+    week_start: date | None = None,
 ) -> int:
-    """Count add/drop transactions made by your team since Monday (fantasy week).
+    """Count add/drop transactions made by your team this fantasy week.
 
-    The weekly transaction limit resets at the start of each Monday.
+    The weekly transaction limit resets at the start of each fantasy week.
+    Fantasy weeks usually run Monday–Sunday, but extended weeks (e.g. the
+    All-Star break) can span two calendar weeks.
 
     Args:
         transactions: Parsed transaction list from fetch_league_transactions().
         team_id: Your team ID. Defaults to config.YAHOO_TEAM_ID.
+        week_start: Start date of the current fantasy week.  When ``None``,
+            defaults to the most recent Monday (standard week assumption).
 
     Returns:
-        Number of transactions placed this week.
+        Number of transactions placed this fantasy week.
     """
     if team_id is None:
         team_id = config.YAHOO_TEAM_ID
-    team_id_str = str(team_id)
+    team_suffix = f".t.{team_id}"
 
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    monday_ts = datetime.combine(monday, datetime.min.time()).timestamp()
+    if week_start is None:
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+
+    start_ts = datetime.combine(week_start, datetime.min.time()).timestamp()
 
     count = 0
     for txn in transactions:
-        # Only count our team
-        if team_id_str not in str(txn.get("team_key", "")):
+        # Only count our team — match the ".t.{id}" suffix to avoid
+        # false positives from team_id appearing in the league number.
+        txn_key = str(txn.get("team_key", ""))
+        if not txn_key.endswith(team_suffix):
             continue
 
         ts = txn.get("timestamp", "")
         try:
             txn_ts = float(ts)
-            if txn_ts >= monday_ts:
+            if txn_ts >= start_ts:
                 count += 1
         except (ValueError, TypeError):
-            # Conservative: if timestamp is unparseable, check status
+            # Conservative: if timestamp is unparseable, skip
             pass
 
     return count

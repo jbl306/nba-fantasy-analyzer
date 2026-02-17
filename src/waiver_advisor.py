@@ -408,7 +408,8 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
                 fetch_nba_schedule, get_upcoming_weeks, build_schedule_analysis,
             )
             schedule = fetch_nba_schedule()
-            weeks = get_upcoming_weeks()
+            _wk0 = league_settings.get("current_week") if league_settings else None
+            weeks = get_upcoming_weeks(current_fantasy_week=_wk0, game_weeks=game_weeks)
             schedule_analysis = build_schedule_analysis(schedule, weeks)
             if schedule_analysis and schedule_analysis.get("weeks"):
                 schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
@@ -442,15 +443,18 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
     # STEP 1b: Fetch league settings & constraints
     # ---------------------------------------------------------------
     league_settings = {}
+    game_weeks: list[dict] | None = None
     try:
         from src.league_settings import (
             fetch_league_settings as fetch_settings,
             format_settings_report,
+            fetch_game_weeks,
         )
         league_settings = fetch_settings(query)
         if league_settings:
             print(format_settings_report(league_settings))
             print()
+        game_weeks = fetch_game_weeks(query)
     except Exception as e:
         print(f"  Warning: could not fetch league settings: {e}\n")
 
@@ -540,7 +544,7 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
         )
         schedule = fetch_nba_schedule()
         _current_wk = league_settings.get("current_week") if league_settings else None
-        weeks = get_upcoming_weeks(current_fantasy_week=_current_wk)
+        weeks = get_upcoming_weeks(current_fantasy_week=_current_wk, game_weeks=game_weeks)
         schedule_analysis = build_schedule_analysis(schedule, weeks)
 
         if schedule_analysis and schedule_analysis.get("weeks"):

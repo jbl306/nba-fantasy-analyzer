@@ -159,28 +159,60 @@ def _fetch_schedule_per_day(
 def get_upcoming_weeks(
     weeks_ahead: int | None = None,
     current_fantasy_week: int | None = None,
+    game_weeks: list[dict] | None = None,
 ) -> list[tuple[date, date, str]]:
-    """Get (start, end, label) tuples for upcoming fantasy weeks (Mon-Sun).
+    """Get (start, end, label) tuples for upcoming fantasy weeks.
 
-    If today is mid-week, the first entry covers the *rest* of the current
-    week starting from today.
+    When *game_weeks* (from Yahoo's ``get_game_weeks_by_game_id``) is
+    provided, the function uses the **actual** Yahoo week boundaries.  This
+    is critical for extended fantasy weeks such as the All-Star break, which
+    can span two calendar weeks.
+
+    Without *game_weeks* it falls back to assuming Mon-Sun calendar weeks.
 
     Args:
         weeks_ahead: Number of weeks to return (default: config.SCHEDULE_WEEKS_AHEAD).
         current_fantasy_week: The current fantasy week number (e.g. 17). If
             provided, labels will say "Week 17", "Week 18", etc. If None,
             labels use relative numbering ("Week 1", "Week 2", …).
+        game_weeks: List of dicts with keys ``week`` (int), ``start`` (date),
+            ``end`` (date) — as returned by
+            :pyfunc:`src.league_settings.fetch_game_weeks`.
 
     Returns:
-        List of (monday, sunday, label) tuples.
+        List of (start_date, end_date, label) tuples.
     """
     if weeks_ahead is None:
         weeks_ahead = config.SCHEDULE_WEEKS_AHEAD
 
     today = date.today()
-    current_monday = today - timedelta(days=today.weekday())  # Monday of this week
 
-    weeks: list[tuple[date, date, str]] = []
+    # ------------------------------------------------------------------
+    # If we have Yahoo game-week data, use exact boundaries
+    # ------------------------------------------------------------------
+    if game_weeks and current_fantasy_week is not None:
+        # Build a lookup {week_num: (start, end)}
+        gw_lookup = {gw["week"]: (gw["start"], gw["end"]) for gw in game_weeks}
+        weeks: list[tuple[date, date, str]] = []
+        for i in range(weeks_ahead):
+            wk = current_fantasy_week + i
+            if wk in gw_lookup:
+                start, end = gw_lookup[wk]
+            else:
+                # Past the schedule data — estimate with Mon-Sun
+                base_monday = today - timedelta(days=today.weekday())
+                start = base_monday + timedelta(weeks=i)
+                end = start + timedelta(days=6)
+            label = f"Week {wk}: {start.strftime('%b %d')} – {end.strftime('%b %d')}"
+            weeks.append((start, end, label))
+        return weeks
+
+    # ------------------------------------------------------------------
+    # Fallback: assume standard Mon-Sun calendar weeks
+    # ------------------------------------------------------------------
+    current_monday = today - timedelta(days=today.weekday())
+
+    weeks = []
     for i in range(weeks_ahead):
         monday = current_monday + timedelta(weeks=i)
         sunday = monday + timedelta(days=6)

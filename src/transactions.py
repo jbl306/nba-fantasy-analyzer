@@ -703,9 +703,23 @@ def run_transaction_flow(
     # ---------------------------------------------------------------
     txn_limit_info = None
     try:
-        from src.league_settings import count_transactions_this_week, check_transaction_limit
+        from src.league_settings import (
+            count_transactions_this_week, check_transaction_limit,
+            fetch_game_weeks, get_current_week_start,
+        )
         transactions_raw = fetch_league_transactions(query)
-        used = count_transactions_this_week(transactions_raw)
+
+        # Use actual Yahoo fantasy week boundaries (handles All-Star week)
+        game_weeks = fetch_game_weeks(query)
+        current_week = None
+        try:
+            meta = query.get_league_metadata()
+            current_week = int(meta.current_week) if hasattr(meta, 'current_week') else None
+        except Exception:
+            pass
+        week_start = get_current_week_start(game_weeks, current_week)
+
+        used = count_transactions_this_week(transactions_raw, week_start=week_start)
         txn_limit_info = check_transaction_limit(used)
         print(f"\n  {txn_limit_info['message']}")
 

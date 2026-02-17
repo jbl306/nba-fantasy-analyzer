@@ -394,10 +394,10 @@ def analyze_bid_history(
         }
 
     # Your team's bids
-    my_team_id = str(config.YAHOO_TEAM_ID)
+    my_team_suffix = f".t.{config.YAHOO_TEAM_ID}"
     your_bids = [
         t for t in transactions
-        if my_team_id in str(t.get("team_key", ""))
+        if str(t.get("team_key", "")).endswith(my_team_suffix)
     ]
 
     return {
