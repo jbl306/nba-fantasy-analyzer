@@ -142,6 +142,7 @@ def extract_player_details(player_obj) -> dict:
         "position": "",
         "player_key": "",
         "status": "",
+        "selected_position": "",
         "percent_owned": 0.0,
     }
 
@@ -153,6 +154,18 @@ def extract_player_details(player_obj) -> dict:
         details["player_key"] = str(player.player_key or "")
     if hasattr(player, "status"):
         details["status"] = str(player.status or "")
+    if hasattr(player, "selected_position"):
+        sp = player.selected_position
+        if hasattr(sp, "position"):
+            details["selected_position"] = str(sp.position or "")
+        elif hasattr(sp, "selected_position"):
+            inner = sp.selected_position
+            if hasattr(inner, "position"):
+                details["selected_position"] = str(inner.position or "")
+        elif isinstance(sp, dict):
+            details["selected_position"] = str(sp.get("position", ""))
+        elif isinstance(sp, str):
+            details["selected_position"] = sp
     if hasattr(player, "percent_owned"):
         po = player.percent_owned
         if hasattr(po, "value"):

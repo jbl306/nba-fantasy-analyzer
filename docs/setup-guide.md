@@ -169,6 +169,28 @@ All configuration lives in `config.py` and can be adjusted:
 | `TOP_N_RECOMMENDATIONS` | 15 | Default number of recommendations |
 | `DETAILED_LOG_LIMIT` | 50 | Number of candidates to fetch game logs for |
 
+### FAAB Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `FAAB_ENABLED` | `False` | Set to `True` if your league uses FAAB bidding for waivers |
+| `DEFAULT_FAAB_BID` | `1` | Fallback bid amount when no historical data is available |
+| `FAAB_STRATEGY` | `"competitive"` | Default bid strategy: `"value"`, `"competitive"`, or `"aggressive"` |
+| `FAAB_BUDGET_REGULAR_SEASON` | `300` | Total FAAB budget for the regular season |
+| `FAAB_BUDGET_PLAYOFFS` | `100` | FAAB budget after playoff reset |
+| `FAAB_MAX_BID_PERCENT` | `0.50` | Max percentage of remaining budget allowed on a single bid |
+
+### Transaction & Schedule Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `WEEKLY_TRANSACTION_LIMIT` | `3` | Max transactions per week (resets Monday) |
+| `SCHEDULE_WEEKS_AHEAD` | `2` | Number of upcoming weeks to analyze for schedule-based scoring |
+| `SCHEDULE_WEIGHT` | `0.10` | How strongly schedule affects score multiplier (±10% per game delta) |
+
+See [FAAB Bid Analysis](faab-analysis.md) for a detailed explanation of strategies and how bid suggestions work.
+See [Schedule Analysis](schedule-analysis.md) for how schedule data is used in scoring and FAAB bids.
+
 ---
 
 ## 7. Troubleshooting

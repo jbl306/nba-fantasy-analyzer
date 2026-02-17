@@ -17,6 +17,55 @@ YAHOO_LEAGUE_ID = os.environ.get("YAHOO_LEAGUE_ID", "94443")
 YAHOO_TEAM_ID = int(os.environ.get("YAHOO_TEAM_ID", "9"))
 YAHOO_GAME_CODE = os.environ.get("YAHOO_GAME_CODE", "nba")
 
+# Roster management settings
+# Only these players on your roster are eligible to be dropped.
+# Everyone else is considered untouchable.
+DROPPABLE_PLAYERS = [
+    "Sandro Mamukelashvili",
+    "Justin Champagnie",
+    "Kristaps Porziņģis",
+]
+
+# FAAB (Free Agent Acquisition Budget) settings
+# Set FAAB_ENABLED = True if your league uses FAAB bidding for waivers.
+# Set to False for standard rolling waiver priority leagues.
+FAAB_ENABLED = False
+DEFAULT_FAAB_BID = 1  # default bid amount when FAAB is enabled
+# Bidding strategy for suggestions: "value", "competitive", or "aggressive"
+#   value:       Bid at 25th percentile (bargain hunting)
+#   competitive: Bid at median (market rate) — DEFAULT
+#   aggressive:  Bid at 75th percentile (maximize win rate)
+FAAB_STRATEGY = "competitive"
+
+# FAAB budget — your league's starting budget per phase.
+# Regular season budget resets to FAAB_BUDGET_PLAYOFFS when playoffs begin.
+FAAB_BUDGET_REGULAR_SEASON = 300   # Total FAAB $ for the regular season
+FAAB_BUDGET_PLAYOFFS = 100         # FAAB $ after playoff reset
+FAAB_MAX_BID_PERCENT = 0.50        # Max fraction of remaining budget on one bid
+
+# FAAB outlier detection — separates standard waiver bids from premium
+# (returning star) bids so outliers don't inflate regular bid suggestions.
+# E.g., Paul George or Jayson Tatum returning from injury command huge bids
+# that would skew the averages for normal waiver pickups.
+PREMIUM_BID_FLOOR = 15     # Minimum bid to be classified as "premium"
+OUTLIER_IQR_FACTOR = 1.5   # IQR multiplier for outlier detection
+
+# Transaction limits
+# Number of add/drop transactions allowed per fantasy week (Mon-Sun).
+# Resets at the start of each Monday.
+WEEKLY_TRANSACTION_LIMIT = 3
+
+# Schedule analysis settings
+# Analyze upcoming games to value waiver targets by playing time opportunity.
+SCHEDULE_WEEKS_AHEAD = 2       # Number of upcoming weeks to analyze
+SCHEDULE_WEIGHT = 0.10         # How much each game delta from avg impacts Adj_Score
+
+# IL/IL+ roster compliance
+# Valid injury statuses for each IL slot type. If a player on an IL slot
+# doesn't have an eligible status, Yahoo blocks ALL transactions.
+IL_ELIGIBLE_STATUSES = {"INJ", "O", "SUSP"}
+IL_PLUS_ELIGIBLE_STATUSES = {"INJ", "O", "GTD", "DTD", "SUSP"}
+
 # nba_api settings
 # Number of recent games to evaluate player performance
 RECENT_GAMES_WINDOW = 14  # last 14 days
@@ -33,7 +82,7 @@ AVAILABILITY_RISKY = 0.40     # 40-60% = heavy discount
 INACTIVE_DAYS_THRESHOLD = 10
 
 # How many top waiver candidates to fetch detailed game logs for
-DETAILED_LOG_LIMIT = 50
+DETAILED_LOG_LIMIT = 10
 
 # Injury report settings
 # Source: Basketball-Reference injury report

@@ -178,6 +178,8 @@ def score_available_players(
     team_needs: dict[str, float] | None = None,
     recent_activity: dict[int, dict] | None = None,
     injury_lookup: dict[str, dict] | None = None,
+    schedule_game_counts: dict[str, int] | None = None,
+    avg_games_per_week: float = 3.5,
 ) -> pd.DataFrame:
     """Score and rank available players directly from the NBA stats DataFrame.
 
@@ -188,12 +190,15 @@ def score_available_players(
       - Availability rate discount (season-long GP rate)
       - Recent activity penalty for players not playing lately
       - Injury report penalty from Basketball-Reference data
+      - Schedule multiplier for upcoming game count (more games = higher value)
 
     Args:
         available_stats: DataFrame of NBA stats for unowned players (with z-scores).
         team_needs: Optional dict of category weaknesses from identify_team_needs.
         recent_activity: Optional dict from check_recent_activity for top candidates.
         injury_lookup: Optional dict from build_injury_lookup for injury status overrides.
+        schedule_game_counts: Optional {team_abbr: games} for the upcoming week.
+        avg_games_per_week: League avg games/week for schedule multiplier baseline.
 
     Returns:
         DataFrame of ranked waiver recommendations.
@@ -278,8 +283,19 @@ def score_available_players(
                 if z_col and z_col in row.index:
                     need_score += row[z_col] * 0.5  # 50% bonus for weak cats
 
-        # Apply availability discount AND injury penalty to the final score
-        adj_score = need_score * avail_mult * injury_mult
+        # Schedule multiplier for upcoming games
+        schedule_mult = 1.0
+        if schedule_game_counts:
+            from src.schedule_analyzer import normalize_team_abbr, compute_schedule_multiplier
+            team_abbr = normalize_team_abbr(str(row.get("TEAM_ABBREVIATION", "")))
+            games = schedule_game_counts.get(team_abbr, 0)
+            schedule_mult = compute_schedule_multiplier(games, avg_games_per_week)
+            rec["Games_Wk"] = games
+        else:
+            rec["Games_Wk"] = "-"
+
+        # Apply availability discount, injury penalty, AND schedule multiplier
+        adj_score = need_score * avail_mult * injury_mult * schedule_mult
         rec["Adj_Score"] = round(adj_score, 2)
 
         recommendations.append(rec)
@@ -303,7 +319,7 @@ def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> st
     df_display = rec_df.head(top_n).copy()
 
     # Select display columns
-    display_cols = ["Player", "Team", "GP", "MIN", "Avail%", "Health", "Injury", "Recent", "G/14d"]
+    display_cols = ["Player", "Team", "GP", "MIN", "Games_Wk", "Avail%", "Health", "Injury", "Recent", "G/14d"]
     for cat_info in config.STAT_CATEGORIES.values():
         if cat_info["name"] in df_display.columns:
             display_cols.append(cat_info["name"])
@@ -328,7 +344,8 @@ def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> st
     )
     lines.append("")
     lines.append("Z_Value   = Raw 9-cat z-score (higher = better all-around)")
-    lines.append("Adj_Score = Z_Value weighted by team needs, availability, AND injury status")
+    lines.append("Adj_Score = Z_Value weighted by team needs, availability, injury, AND schedule")
+    lines.append("Games_Wk  = Games this upcoming week (more games = more stat production)")
     lines.append("Avail%    = Games Played / Team Games (season durability)")
     lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)")
     lines.append("Injury    = OUT-SEASON | OUT | DTD (Day-To-Day) | - (not on injury report)")
@@ -348,7 +365,7 @@ def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> st
     return "\n".join(lines)
 
 
-def run_waiver_analysis(skip_yahoo: bool = False) -> None:
+def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
     """Run the full waiver wire analysis pipeline.
 
     The flow is Yahoo-first:
@@ -360,6 +377,11 @@ def run_waiver_analysis(skip_yahoo: bool = False) -> None:
     Args:
         skip_yahoo: If True, show overall NBA stats rankings without Yahoo
                     roster data (useful for testing without Yahoo API setup).
+        return_data: If True, return (query, rec_df) tuple for downstream use
+                     (e.g. transaction submission). Only applies when not skipping Yahoo.
+
+    Returns:
+        None normally, or (query, rec_df, nba_stats, schedule_analysis) if return_data=True.
     """
     if skip_yahoo:
         # Fallback: just show top NBA players by z-score
@@ -377,15 +399,35 @@ def run_waiver_analysis(skip_yahoo: bool = False) -> None:
             )
             print(f"  {len(injuries)} players on injury report, {injured_in_pool} in stats pool\n")
 
+        # Fetch schedule
+        schedule_game_counts = None
+        avg_games_per_week = 3.5
+        schedule_analysis = None
+        try:
+            from src.schedule_analyzer import (
+                fetch_nba_schedule, get_upcoming_weeks, build_schedule_analysis,
+            )
+            schedule = fetch_nba_schedule()
+            weeks = get_upcoming_weeks()
+            schedule_analysis = build_schedule_analysis(schedule, weeks)
+            if schedule_analysis and schedule_analysis.get("weeks"):
+                schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
+                avg_games_per_week = schedule_analysis["avg_games_per_week"]
+        except Exception as e:
+            print(f"  Warning: schedule analysis failed: {e}")
+
         print("=" * 70)
         print("TOP NBA PLAYERS BY 9-CATEGORY Z-SCORE VALUE")
         print("(Yahoo Fantasy integration skipped)")
         print("=" * 70)
 
         # Use the full scoring pipeline (without team needs) to apply
-        # availability + injury multipliers
+        # availability + injury + schedule multipliers
         recommendations = score_available_players(
-            nba_stats, team_needs=None, recent_activity=None, injury_lookup=injury_lookup
+            nba_stats, team_needs=None, recent_activity=None,
+            injury_lookup=injury_lookup,
+            schedule_game_counts=schedule_game_counts,
+            avg_games_per_week=avg_games_per_week,
         )
         print(format_recommendations(recommendations))
         return
@@ -395,6 +437,22 @@ def run_waiver_analysis(skip_yahoo: bool = False) -> None:
     # ---------------------------------------------------------------
     print("Connecting to Yahoo Fantasy Sports...")
     query = create_yahoo_query()
+
+    # ---------------------------------------------------------------
+    # STEP 1b: Fetch league settings & constraints
+    # ---------------------------------------------------------------
+    league_settings = {}
+    try:
+        from src.league_settings import (
+            fetch_league_settings as fetch_settings,
+            format_settings_report,
+        )
+        league_settings = fetch_settings(query)
+        if league_settings:
+            print(format_settings_report(league_settings))
+            print()
+    except Exception as e:
+        print(f"  Warning: could not fetch league settings: {e}\n")
 
     print("\nFetching all team rosters in the league...")
     all_rosters, owned_names = get_all_team_rosters(query)
@@ -470,13 +528,57 @@ def run_waiver_analysis(skip_yahoo: bool = False) -> None:
         print(f"  {len(injuries)} players on injury report, {injured_available} available but injured\n")
 
     # ---------------------------------------------------------------
-    # STEP 6: Rank available players by need-weighted, availability-adjusted score
+    # STEP 5c: Fetch upcoming NBA schedule
     # ---------------------------------------------------------------
-    print("Ranking available players (need + availability + injury adjusted)...")
-    recommendations = score_available_players(available_stats, team_needs, recent_activity, injury_lookup)
+    schedule_game_counts = None
+    avg_games_per_week = 3.5
+    schedule_analysis = None
+    try:
+        from src.schedule_analyzer import (
+            fetch_nba_schedule, get_upcoming_weeks, build_schedule_analysis,
+            format_schedule_report as fmt_sched,
+        )
+        schedule = fetch_nba_schedule()
+        _current_wk = league_settings.get("current_week") if league_settings else None
+        weeks = get_upcoming_weeks(current_fantasy_week=_current_wk)
+        schedule_analysis = build_schedule_analysis(schedule, weeks)
+
+        if schedule_analysis and schedule_analysis.get("weeks"):
+            schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
+            avg_games_per_week = schedule_analysis["avg_games_per_week"]
+    except Exception as e:
+        print(f"  Warning: schedule analysis failed: {e}\n")
+
+    # ---------------------------------------------------------------
+    # STEP 6: Rank available players by need-weighted, schedule-adjusted score
+    # ---------------------------------------------------------------
+    print("Ranking available players (need + availability + injury + schedule adjusted)...")
+    recommendations = score_available_players(
+        available_stats, team_needs, recent_activity, injury_lookup,
+        schedule_game_counts=schedule_game_counts,
+        avg_games_per_week=avg_games_per_week,
+    )
     print(format_recommendations(recommendations))
+
+    # ---------------------------------------------------------------
+    # STEP 6b: Print schedule comparison report
+    # ---------------------------------------------------------------
+    if schedule_analysis:
+        try:
+            sched_report = fmt_sched(
+                schedule_analysis,
+                waiver_df=recommendations,
+                droppable_names=list(config.DROPPABLE_PLAYERS),
+                nba_stats=nba_stats,
+            )
+            print(sched_report)
+        except Exception as e:
+            print(f"  Warning: schedule report failed: {e}")
 
     # Save results
     output_file = config.OUTPUT_DIR / "waiver_recommendations.csv"
     recommendations.to_csv(output_file)
     print(f"\nResults saved to {output_file}")
+
+    if return_data:
+        return query, recommendations, nba_stats, schedule_analysis

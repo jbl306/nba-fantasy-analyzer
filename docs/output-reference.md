@@ -90,7 +90,8 @@ The main output is a ranked table of available waiver wire players.
 | **BLK** | nba_api | Blocks per game |
 | **TO** | nba_api | Turnovers per game |
 | **Z_Value** | Computed | Sum of z-scores across all 9 categories. Raw talent ranking without adjustments. |
-| **Adj_Score** | Computed | Final adjusted score factoring in team needs, availability, and recent activity. **This is the primary sort column.** |
+| **Adj_Score** | Computed | Final adjusted score factoring in team needs, availability, recent activity, and schedule. **This is the primary sort column.** |
+| **Games_Wk** | Schedule | Number of games the player's team plays this fantasy week (Mon–Sun). More games = more stat opportunity. |
 
 ### Health Flag
 
@@ -134,6 +135,50 @@ Based on when the player last appeared in an NBA game:
 - **High Z_Value but low Adj_Score**: The player is talented but penalized for poor availability or current inactivity. They may be injured. Stash candidate for IR if your league supports it.
 - **Adj_Score close to Z_Value**: The player is healthy, recently active, and may also address your team needs. This is an ideal pickup.
 - **Adj_Score higher than Z_Value**: The player's stats align with your team's weakest categories, giving them a need-weighted bonus on top of raw talent.
+- **High Games_Wk**: Players with 4–5 games this week provide more stat opportunities. Combined with a high Adj_Score, these are premium pickups for the current week.
+
+---
+
+## 2.4 League Settings & Constraints
+
+When connected to Yahoo, a league settings report is displayed showing league rules and your current constraints:
+
+```
+======================================================================
+  LEAGUE SETTINGS & CONSTRAINTS
+======================================================================
+
+  League:           My Fantasy League
+  Scoring:          head
+  Waiver type:      FAAB
+  Current week:     14
+  Playoff starts:   Week 20
+
+  ────────────────────────────────────────
+  FAAB BUDGET
+  ────────────────────────────────────────
+  Remaining:        $250
+  Total budget:     $300
+  Weeks left:       6
+  Weekly budget:    $41.7
+  Max single bid:   $125
+  Budget status:    TIGHT
+
+  ────────────────────────────────────────
+  WEEKLY TRANSACTIONS
+  ────────────────────────────────────────
+  1 transaction remaining this week (2/3)
+```
+
+| Field | Description |
+|-------|-------------|
+| **Remaining** | Current FAAB balance from Yahoo |
+| **Total budget** | $300 regular season or $100 playoffs |
+| **Weeks left** | Weeks remaining in current phase |
+| **Weekly budget** | Remaining ÷ weeks left |
+| **Max single bid** | 50% of remaining budget |
+| **Budget status** | FLUSH (≥ 1.3×), HEALTHY (≥ 0.9×), TIGHT (≥ 0.6×), or CRITICAL (< 0.6×) |
+| **Transactions** | Used vs. limit this week (resets Monday) |
 
 ---
 
@@ -180,3 +225,63 @@ python main.py --skip-yahoo --top 25
 | `--skip-yahoo` | off | Run without Yahoo connection; shows all qualifying NBA players ranked by z-score with availability adjustments |
 | `--top N` | 15 | Number of recommendations to display |
 | `--days N` | (season) | Currently reserved for future per-range stat window functionality |
+| `--claim` | off | After analysis, enter interactive multi-bid transaction flow |
+| `--dry-run` | off | Preview transactions without submitting (implies `--claim`) |
+| `--faab-history` | off | Analyze league FAAB bid history and show suggested bids for all strategies |
+| `--strategy` | `competitive` | Override FAAB bidding strategy: `value`, `competitive`, or `aggressive` |
+
+---
+
+## 5. FAAB Analysis Output
+
+When running with `--faab-history`, additional output sections appear after the recommendation table:
+
+### League Bid Summary
+
+Overall FAAB bidding statistics (total transactions, mean/median/max bid, standard deviation).
+
+### Bids by Player Quality Tier
+
+A table showing bid distribution for each quality tier (Elite, Strong, Solid, Streamer, Dart) — including count, mean, median, min, max, P25, and P75 values.
+
+### Spending by Team
+
+Per-team spending breakdown (total spent, number of bids, average bid, max bid), sorted by total spending.
+
+### Top 10 Biggest FAAB Bids
+
+The largest individual bids placed in your league this season.
+
+### Suggested FAAB Bids
+
+Three tables (one per strategy: value, competitive, aggressive) showing suggested bid amounts for the top 10 waiver candidates, with tier classification, confidence level, games this week, and reasoning. Bids are adjusted for:
+
+- **Budget health** — scaled by budget factor (FLUSH/HEALTHY/TIGHT/CRITICAL)
+- **Schedule value** — scaled by upcoming games vs. league average (±15% per game)
+- **Safety caps** — never exceeds 50% of remaining budget or total remaining
+
+See [FAAB Bid Analysis](faab-analysis.md) and [Schedule Analysis](schedule-analysis.md) for full details.
+
+---
+
+## 6. Schedule Analysis Output
+
+When schedule data is available, a schedule comparison report is printed after the recommendations:
+
+### Team Game Grid
+
+Shows how many games each NBA team plays in the upcoming week(s).
+
+### Waiver Targets: Projected Weekly Value
+
+Shows each recommended waiver target with their team, games this week, z-score per game, and projected weekly value (z/game × games).
+
+### Droppable Players: Current Weekly Value
+
+Same metrics for your droppable players, allowing direct comparison.
+
+### Net Value: Waiver – Best Droppable
+
+Head-to-head comparison showing the net gain from picking up each waiver target vs. your best droppable player.
+
+See [Schedule Analysis](schedule-analysis.md) for the complete methodology.

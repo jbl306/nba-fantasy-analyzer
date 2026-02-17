@@ -4,7 +4,7 @@ This document describes how the NBA Fantasy Advisor generates waiver wire recomm
 
 ## Pipeline Overview
 
-The recommendation engine runs a six-step pipeline:
+The recommendation engine runs a six-step pipeline, with optional FAAB analysis and transaction submission:
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -28,8 +28,16 @@ The recommendation engine runs a six-step pipeline:
 ├──────────────────────────────────────────────────┤
 │  6. Score, rank, and output recommendations      │
 │     Z-scores × team needs × avail × injury       │
+├──────────────────────────────────────────────────┤
+│  7. FAAB bid analysis (optional, --faab-history) │
+│     Fetch league transactions → bid suggestions  │
+├──────────────────────────────────────────────────┤
+│  8. Transaction submission (optional, --claim)   │
+│     Multi-bid add/drop claims via Yahoo API      │
 └──────────────────────────────────────────────────┘
 ```
+
+Steps 7 and 8 are optional post-analysis actions. See [FAAB Bid Analysis](faab-analysis.md) and [Transactions](transactions.md) for details.
 
 ## Step 1 — Yahoo Fantasy Connection
 
@@ -67,7 +75,7 @@ This catches players who have great season averages but are currently injured, s
 The final score for each player combines three factors:
 
 ```
-Adj_Score = (Z_Total + Need_Boost) × Availability_Multiplier
+Adj_Score = (Z_Total + Need_Boost) × Availability_Multiplier × Schedule_Multiplier
 ```
 
 Each component is described below.
@@ -224,7 +232,7 @@ This means two "Out" players can receive very different penalties based on their
 Putting it all together:
 
 $$
-Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{recent} \times M_{injury}
+Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{recent} \times M_{injury} \times M_{schedule}
 $$
 
 Where:
@@ -233,6 +241,7 @@ Where:
 - $M_{avail}$ = season availability multiplier (1.0 / 0.85 / 0.65 / 0.45)
 - $M_{recent}$ = recent activity multiplier (1.0 / 0.75 / 0.30)
 - $M_{injury}$ = injury report multiplier (0.0 to 1.0; 1.0 if not on injury report)
+- $M_{schedule}$ = schedule multiplier based on team games vs league average (see [Schedule Analysis](schedule-analysis.md))
 
 All multipliers stack multiplicatively. A player who is "Moderate" season-long, "Inactive" recently, and "Out" on the injury report:
 
