@@ -29,8 +29,9 @@ DROPPABLE_PLAYERS = [
 # FAAB (Free Agent Acquisition Budget) settings
 # Set FAAB_ENABLED = True if your league uses FAAB bidding for waivers.
 # Set to False for standard rolling waiver priority leagues.
-FAAB_ENABLED = False
+FAAB_ENABLED = True
 DEFAULT_FAAB_BID = 1  # default bid amount when FAAB is enabled
+FAAB_BID_OVERRIDE = True  # Prompt to override suggested FAAB bid amount (False = auto-accept)
 # Bidding strategy for suggestions: "value", "competitive", or "aggressive"
 #   value:       Bid at 25th percentile (bargain hunting)
 #   competitive: Bid at median (market rate) — DEFAULT
@@ -57,8 +58,9 @@ WEEKLY_TRANSACTION_LIMIT = 3
 
 # Schedule analysis settings
 # Analyze upcoming games to value waiver targets by playing time opportunity.
-SCHEDULE_WEEKS_AHEAD = 2       # Number of upcoming weeks to analyze
+SCHEDULE_WEEKS_AHEAD = 3       # Number of upcoming weeks to analyze
 SCHEDULE_WEIGHT = 0.10         # How much each game delta from avg impacts Adj_Score
+SCHEDULE_WEEK_DECAY = 0.5      # Weight decay per future week (wk1=1.0, wk2=0.5, wk3=0.25)
 
 # IL/IL+ roster compliance
 # Valid injury statuses for each IL slot type. If a player on an IL slot
@@ -90,11 +92,26 @@ INJURY_REPORT_ENABLED = True  # set to False to skip injury scraping
 # Max characters of injury blurb to show in output
 INJURY_BLURB_MAX_LENGTH = 80
 
+# Punt categories — leave empty for a balanced build.
+# List category *names* (e.g. "FT%", "TO") you intentionally punt.
+# Punted categories are excluded from Z_TOTAL, team-needs analysis,
+# and the need-weighted boost so they don't influence recommendations.
+# Examples: PUNT_CATEGORIES = ["FT%", "TO"]   # punt FT% and turnovers
+PUNT_CATEGORIES: list[str] = []
+
 # 9-Category league stat categories
 # Standard 9-cat: FG%, FT%, 3PM, PTS, REB, AST, STL, BLK, TO
+#
+# FG% and FT% use volume-weighted z-scores: a player's "impact" on your
+# team's shooting percentage is proportional to both their accuracy AND
+# their attempt volume (FGA / FTA per game).  This prevents low-volume
+# shooters from inflating FG%/FT% value.
+#
+# The volume_col key tells the z-score engine which column to use as the
+# weighting factor.  Categories without volume_col use a standard z-score.
 STAT_CATEGORIES = {
-    "FG_PCT": {"name": "FG%", "higher_is_better": True},
-    "FT_PCT": {"name": "FT%", "higher_is_better": True},
+    "FG_PCT": {"name": "FG%", "higher_is_better": True, "volume_col": "FGA"},
+    "FT_PCT": {"name": "FT%", "higher_is_better": True, "volume_col": "FTA"},
     "FG3M": {"name": "3PM", "higher_is_better": True},
     "PTS": {"name": "PTS", "higher_is_better": True},
     "REB": {"name": "REB", "higher_is_better": True},

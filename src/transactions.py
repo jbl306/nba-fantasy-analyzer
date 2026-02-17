@@ -864,10 +864,22 @@ def run_transaction_flow(
     submitted_claims: list[dict] = []
     bid_number = 0
 
-    # Track how many transactions we can still make
+    # Track how many transactions we can still make.
+    # Yahoo processes multiple bids against the same drop player as
+    # priority-ordered alternatives — only the winning bid actually
+    # consumes a transaction slot.  So we count *unique drop players*
+    # across queued claims, not total claims, when checking the limit.
     txn_remaining = txn_limit_info["remaining"] if txn_limit_info else 999
 
+    def _unique_drops_used() -> int:
+        """Count distinct drop players already queued."""
+        return len({c["drop_name"] for c in submitted_claims})
+
     while True:
+        # Recalculate remaining based on unique drop players queued.
+        txn_base = txn_limit_info["remaining"] if txn_limit_info else 999
+        txn_remaining = txn_base - _unique_drops_used()
+
         # Check if we've hit the weekly limit
         if txn_remaining <= 0:
             print(f"\n  Weekly transaction limit reached. Cannot add more bids.")
@@ -936,9 +948,13 @@ def run_transaction_flow(
                         print(f"  Budget: ${budget_status['remaining_budget']} remaining"
                               f" | Max bid: ${budget_status['max_single_bid']}")
 
-                bid_input = input(
-                    f"  FAAB bid amount (${suggested} suggested, or enter amount): "
-                ).strip()
+                bid_input = ""
+                if config.FAAB_BID_OVERRIDE:
+                    bid_input = input(
+                        f"  FAAB bid amount (${suggested} suggested, or enter amount): "
+                    ).strip()
+                else:
+                    print(f"  FAAB bid: ${suggested} (auto-accepted)")
                 if bid_input:
                     faab_bid = int(bid_input)
                 else:
@@ -964,7 +980,13 @@ def run_transaction_flow(
             "drop_name": drop_name,
             "faab_bid": faab_bid,
         })
-        txn_remaining -= 1
+
+        # Recalculate remaining based on unique drop players queued.
+        # Multiple bids against the same drop player only consume one
+        # transaction slot (Yahoo voids the rest if the first wins).
+        txn_base = txn_limit_info["remaining"] if txn_limit_info else 999
+        txn_remaining = txn_base - _unique_drops_used()
+
         print(f"  ✓ Queued: ADD {add_name} / DROP {drop_name}"
               + (f" / ${faab_bid}" if faab_bid is not None else ""))
 

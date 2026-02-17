@@ -145,8 +145,25 @@ def get_recent_player_stats(days: int | None = None) -> pd.DataFrame:
 def compute_9cat_z_scores(df: pd.DataFrame) -> pd.DataFrame:
     """Compute z-scores for each 9-category stat and an overall value.
 
-    For each stat category, computes how many standard deviations above/below
-    the league average a player is. Turnovers are inverted (lower is better).
+    For counting stats (3PM, PTS, REB, AST, STL, BLK, TO), computes a
+    standard z-score: ``(x - mean) / std``.
+
+    For **percentage stats** (FG%, FT%), uses **volume-weighted impact**
+    z-scores so that high-volume shooters get proportionally more credit.
+    The impact of a player on your team's FG% depends on both accuracy
+    *and* shot attempts::
+
+        impact_i = FGA_i × (FG%_i − league_avg_FG%)
+        z_FG%    = (impact_i − mean(impact)) / std(impact)
+
+    This prevents a player shooting .650 on 2 FGA/game from outranking a
+    player shooting .520 on 16 FGA/game, which better reflects real H2H
+    category math where team FG% = total_FGM / total_FGA.
+
+    Turnovers are inverted (fewer is better).
+
+    Categories listed in ``config.PUNT_CATEGORIES`` are still computed
+    (individual z-columns remain) but are **excluded** from ``Z_TOTAL``.
 
     Args:
         df: DataFrame with player stats (must include the stat columns).
@@ -156,27 +173,57 @@ def compute_9cat_z_scores(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
-    z_columns = []
+    punt_names = {c.upper() for c in config.PUNT_CATEGORIES}
+    z_columns: list[str] = []
+    z_columns_for_total: list[str] = []
+
     for stat_key, cat_info in config.STAT_CATEGORIES.items():
         if stat_key not in df.columns:
             continue
 
-        col = df[stat_key].astype(float)
-        mean = col.mean()
-        std = col.std()
+        z_col = f"Z_{stat_key}"
+        volume_col = cat_info.get("volume_col")
 
-        if std == 0:
-            df[f"Z_{stat_key}"] = 0.0
+        if volume_col and volume_col in df.columns:
+            # --- Volume-weighted impact z-score (FG%, FT%) ---
+            pct = df[stat_key].astype(float)
+            vol = df[volume_col].astype(float)
+            league_avg_pct = pct.mean()
+
+            # Impact = attempts × (player_pct − league_avg_pct)
+            impact = vol * (pct - league_avg_pct)
+            imp_mean = impact.mean()
+            imp_std = impact.std()
+
+            if imp_std == 0:
+                df[z_col] = 0.0
+            else:
+                z = (impact - imp_mean) / imp_std
+                if not cat_info["higher_is_better"]:
+                    z = -z
+                df[z_col] = z
         else:
-            z = (col - mean) / std
-            if not cat_info["higher_is_better"]:
-                z = -z  # invert for turnovers
-            df[f"Z_{stat_key}"] = z
+            # --- Standard z-score (counting stats) ---
+            col = df[stat_key].astype(float)
+            mean = col.mean()
+            std = col.std()
 
-        z_columns.append(f"Z_{stat_key}")
+            if std == 0:
+                df[z_col] = 0.0
+            else:
+                z = (col - mean) / std
+                if not cat_info["higher_is_better"]:
+                    z = -z
+                df[z_col] = z
 
-    # Overall value = sum of z-scores across all categories
-    df["Z_TOTAL"] = df[z_columns].sum(axis=1)
+        z_columns.append(z_col)
+
+        # Only include non-punted categories in Z_TOTAL
+        if cat_info["name"].upper() not in punt_names:
+            z_columns_for_total.append(z_col)
+
+    # Overall value = sum of z-scores across non-punted categories
+    df["Z_TOTAL"] = df[z_columns_for_total].sum(axis=1) if z_columns_for_total else 0.0
 
     return df
 

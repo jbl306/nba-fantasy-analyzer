@@ -122,14 +122,20 @@ def analyze_roster(
 def identify_team_needs(roster_df: pd.DataFrame) -> dict[str, float]:
     """Identify which stat categories your team is weakest in.
 
+    Categories listed in ``config.PUNT_CATEGORIES`` are excluded so they
+    don't appear as weaknesses — you're intentionally ignoring them.
+
     Args:
         roster_df: DataFrame from analyze_roster with z-score columns.
 
     Returns:
         Dict mapping category names to average team z-scores, sorted weakest first.
     """
+    punt_names = {c.upper() for c in config.PUNT_CATEGORIES}
     cat_averages = {}
     for stat_key, cat_info in config.STAT_CATEGORIES.items():
+        if cat_info["name"].upper() in punt_names:
+            continue
         z_col = f"Z_{stat_key}"
         if z_col in roster_df.columns:
             cat_averages[cat_info["name"]] = roster_df[z_col].mean()
@@ -144,6 +150,11 @@ def format_team_analysis(roster_df: pd.DataFrame, team_needs: dict) -> str:
     lines.append("=" * 70)
     lines.append("YOUR TEAM CATEGORY ANALYSIS")
     lines.append("=" * 70)
+
+    # Show punt info if configured
+    if config.PUNT_CATEGORIES:
+        lines.append(f"\n  Punt mode: {', '.join(config.PUNT_CATEGORIES)}")
+        lines.append("  (excluded from Z_TOTAL, needs analysis, and recommendations)")
 
     # Show category averages
     lines.append(f"\n{'Category':<12} {'Team Avg Z':>12} {'Assessment':>15}")
@@ -180,6 +191,7 @@ def score_available_players(
     injury_lookup: dict[str, dict] | None = None,
     schedule_game_counts: dict[str, int] | None = None,
     avg_games_per_week: float = 3.5,
+    schedule_analysis: dict | None = None,
 ) -> pd.DataFrame:
     """Score and rank available players directly from the NBA stats DataFrame.
 
@@ -192,6 +204,9 @@ def score_available_players(
       - Injury report penalty from Basketball-Reference data
       - Schedule multiplier for upcoming game count (more games = higher value)
 
+    When *schedule_analysis* is provided (multi-week), the schedule multiplier
+    uses week-decay weighting (current week counts more than future weeks).
+
     Args:
         available_stats: DataFrame of NBA stats for unowned players (with z-scores).
         team_needs: Optional dict of category weaknesses from identify_team_needs.
@@ -199,6 +214,8 @@ def score_available_players(
         injury_lookup: Optional dict from build_injury_lookup for injury status overrides.
         schedule_game_counts: Optional {team_abbr: games} for the upcoming week.
         avg_games_per_week: League avg games/week for schedule multiplier baseline.
+        schedule_analysis: Optional full schedule analysis dict from
+            :func:`build_schedule_analysis`.  Enables multi-week decay weighting.
 
     Returns:
         DataFrame of ranked waiver recommendations.
@@ -207,6 +224,20 @@ def score_available_players(
     cat_name_to_z_col = {}
     for stat_key, cat_info in config.STAT_CATEGORIES.items():
         cat_name_to_z_col[cat_info["name"]] = f"Z_{stat_key}"
+
+    # Pre-build per-team multi-week game counts for decay-weighted multiplier
+    team_week_data: dict[str, list[tuple[int, float]]] = {}
+    if schedule_analysis and schedule_analysis.get("weeks"):
+        from src.schedule_analyzer import normalize_team_abbr as _norm
+        weeks_data = schedule_analysis["weeks"]
+        all_teams: set[str] = set()
+        for wk in weeks_data:
+            all_teams.update(wk["game_counts"].keys())
+        for team in all_teams:
+            team_week_data[team] = [
+                (wk["game_counts"].get(team, 0), wk["avg_games"])
+                for wk in weeks_data
+            ]
 
     recommendations = []
 
@@ -275,6 +306,7 @@ def score_available_players(
         rec["Z_Value"] = round(z_total, 2)
 
         # Compute a need-adjusted score boosting players in weak categories
+        # (team_needs already excludes punted categories)
         need_score = z_total
         if team_needs:
             weakest_cats = list(team_needs.keys())[:3]  # top 3 weakest
@@ -283,13 +315,18 @@ def score_available_players(
                 if z_col and z_col in row.index:
                     need_score += row[z_col] * 0.5  # 50% bonus for weak cats
 
-        # Schedule multiplier for upcoming games
+        # Schedule multiplier for upcoming games (week-decay weighted)
         schedule_mult = 1.0
         if schedule_game_counts:
             from src.schedule_analyzer import normalize_team_abbr, compute_schedule_multiplier
             team_abbr = normalize_team_abbr(str(row.get("TEAM_ABBREVIATION", "")))
             games = schedule_game_counts.get(team_abbr, 0)
-            schedule_mult = compute_schedule_multiplier(games, avg_games_per_week)
+
+            # Use multi-week decay-weighted multiplier when available
+            week_counts = team_week_data.get(team_abbr)
+            schedule_mult = compute_schedule_multiplier(
+                games, avg_games_per_week, week_game_counts=week_counts,
+            )
             rec["Games_Wk"] = games
         else:
             rec["Games_Wk"] = "-"
@@ -357,7 +394,7 @@ def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> st
         if not injured_players.empty:
             lines.append("")
             lines.append("=" * 100)
-            lines.append("INJURY REPORT NOTES (source: Basketball-Reference)")
+            lines.append("INJURY REPORT NOTES (source: ESPN)")
             lines.append("=" * 100)
             for _, row in injured_players.iterrows():
                 lines.append(f"  {row['Player']:<25} {row['Injury_Note']}")
@@ -429,6 +466,7 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
             injury_lookup=injury_lookup,
             schedule_game_counts=schedule_game_counts,
             avg_games_per_week=avg_games_per_week,
+            schedule_analysis=schedule_analysis,
         )
         print(format_recommendations(recommendations))
         return
@@ -561,6 +599,7 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
         available_stats, team_needs, recent_activity, injury_lookup,
         schedule_game_counts=schedule_game_counts,
         avg_games_per_week=avg_games_per_week,
+        schedule_analysis=schedule_analysis,
     )
     print(format_recommendations(recommendations))
 

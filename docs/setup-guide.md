@@ -80,9 +80,7 @@ Required packages:
 - `pandas` — Data manipulation
 - `python-dotenv` — .env file loading
 - `tabulate` — Pretty table output
-- `beautifulsoup4` — HTML parsing for injury report scraping
-- `cloudscraper` — Bypasses Cloudflare to fetch Basketball-Reference data
-- `requests` — HTTP client
+- `requests` — HTTP client (ESPN injury API, etc.)
 
 ---
 

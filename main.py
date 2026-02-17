@@ -16,6 +16,13 @@ Usage:
 import argparse
 import sys
 
+# Ensure Unicode output works on Windows (cp1252 can't encode diacritics
+# in player names like Dončić, Vučević, Nurkić).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import config
 from src.waiver_advisor import run_waiver_analysis
 

@@ -23,7 +23,7 @@ The recommendation engine runs a six-step pipeline, with optional FAAB analysis 
 │  5a. Check recent game activity (top 50)         │
 │     Game logs to detect injuries / inactivity    │
 ├──────────────────────────────────────────────────┤
-│  5b. Scrape injury report (Basketball-Reference) │
+│  5b. Fetch injury report (ESPN JSON API)         │
 │     Real injury designations + news blurbs       │
 ├──────────────────────────────────────────────────┤
 │  6. Score, rank, and output recommendations      │
@@ -106,7 +106,9 @@ The standard 9-category head-to-head format uses:
 
 ### Calculation
 
-For each category:
+#### Counting Stats (3PM, PTS, REB, AST, STL, BLK, TO)
+
+For each counting-stat category, a standard z-score is computed:
 
 $$
 z_i = \frac{x_i - \mu}{\sigma}
@@ -119,15 +121,59 @@ Where:
 
 For turnovers, the z-score is **inverted** (multiplied by -1) since fewer turnovers are better.
 
+#### Percentage Stats — Volume-Weighted Impact (FG%, FT%)
+
+Raw shooting percentages are misleading in H2H because a player's contribution to your team's FG% or FT% depends on both **accuracy** and **attempt volume**. In H2H matchups, your team's FG% is calculated as:
+
+$$
+\text{Team FG\%} = \frac{\sum \text{FGM}}{\sum \text{FGA}}
+$$
+
+A player shooting .650 on 2 FGA/game barely moves the needle, while a player shooting .520 on 16 FGA/game dominates the denominator. To capture this, FG% and FT% use **impact-based z-scores**:
+
+$$
+\text{impact}_i = \text{FGA}_i \times (\text{FG\%}_i - \overline{\text{FG\%}})
+$$
+
+$$
+z_{FG\%} = \frac{\text{impact}_i - \mu_{\text{impact}}}{\sigma_{\text{impact}}}
+$$
+
+The same approach applies to FT% using FTA as the volume weight. This ensures that high-volume efficient shooters are properly rewarded and low-volume outliers are not overvalued.
+
+**Example:** A center shooting .680 FG% on 3.5 FGA/game has an impact of $3.5 \times (0.680 - 0.475) = 0.72$. A wing shooting .490 FG% on 16 FGA/game has an impact of $16 \times (0.490 - 0.475) = 0.24$. Despite the wing having a lower FG%, the center's z-score is higher because his efficiency edge × volume produces more impact — but both are relatively modest. Compare to a star shooting .550 on 20 FGA: impact = $20 \times 0.075 = 1.50$ — clearly the most valuable for your team's FG%.
+
 ### Total Z-Score (Z_Value)
 
-The raw player value is the **sum** of all 9 individual category z-scores:
+The raw player value is the **sum** of all non-punted category z-scores:
 
 $$
-Z\_Total = \sum_{c=1}^{9} z_c
+Z\_Total = \sum_{c \notin \text{punt}} z_c
 $$
 
-A higher Z_Total means the player contributes positively across more categories.
+A higher Z_Total means the player contributes positively across more categories. If no categories are punted, this is the sum of all 9 z-scores.
+
+---
+
+## Punt-Category Mode
+
+In competitive 9-cat H2H leagues, many managers intentionally **punt** (give up) 1–2 weak categories to dominate the remaining 7. For example, a roster built around guards might punt blocks and rebounds to stack assists, steals, 3PM, and FT%.
+
+The tool supports this via the `PUNT_CATEGORIES` config setting:
+
+```python
+# config.py
+PUNT_CATEGORIES = ["BLK", "REB"]  # example: punt blocks and boards
+```
+
+When punt mode is active:
+
+1. **Z_Total** excludes punted categories — a big man's block value won't inflate rankings if you're punting blocks.
+2. **Team needs analysis** ignores punted categories — they won't appear as "weaknesses" you should address.
+3. **Need-weighted boost** only considers non-punted categories — recommendations focus on your actual competitive categories.
+4. **Individual z-score columns are still computed** — you can still see what a player does in punted cats, they just don't affect rankings.
+
+Leave `PUNT_CATEGORIES = []` for a balanced build that optimizes across all 9 categories.
 
 ---
 
@@ -146,7 +192,7 @@ Your roster is matched against the NBA stats pool and each player's z-scores are
 
 ### Need-Weighted Boost
 
-The 3 weakest categories on your roster receive a **50% bonus weight** when scoring waiver candidates:
+The 3 weakest **non-punted** categories on your roster receive a **50% bonus weight** when scoring waiver candidates:
 
 $$
 Need\_Boost = \sum_{w \in \text{3 weakest}} z_w \times 0.5
@@ -199,9 +245,19 @@ This means their adjusted score is only ~20% of their raw talent value, effectiv
 
 ---
 
-## Injury Report (Basketball-Reference)
+## Injury Report (ESPN API)
 
-The tool scrapes the current NBA injury report from [Basketball-Reference](https://www.basketball-reference.com/friv/injuries.fcgi) using `cloudscraper` to bypass Cloudflare protection. This provides **real injury designations** and **detailed news blurbs** that override the game-log heuristics.
+The tool fetches the current NBA injury report from [ESPN's public JSON API](https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries) — a structured endpoint that requires no authentication and returns comprehensive injury data for all 30 teams. This provides **real injury designations** and **detailed news blurbs** that override the game-log heuristics.
+
+ESPN's API returns structured fields per player including `fantasyStatus` (OFS, OUT, GTD), injury type, body part, side, and projected return date. These are mapped to severity classifications:
+
+| ESPN Status | Maps To | Meaning |
+|-------------|---------|--------|
+| `OFS` | Out For Season | Season-ending injury or surgery |
+| `OUT` + extended keywords | Out (extended) | Multi-week absence |
+| `OUT` | Out | Currently out, timeline varies |
+| `GTD` + status "Out" | Out (game-time) | Listed out but day-to-day evaluation |
+| `GTD` | Day-To-Day | Could play any game |
 
 This is critical because a player like Jaren Jackson Jr. may have an 80%+ GP rate (looks "Healthy") but was just declared out for the season with knee surgery. The game log check might flag him as "Inactive" eventually, but the injury report catches it immediately with context.
 

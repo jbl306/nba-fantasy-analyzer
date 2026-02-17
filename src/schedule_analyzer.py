@@ -332,15 +332,47 @@ def build_schedule_analysis(
 def compute_schedule_multiplier(
     games_this_week: int,
     avg_games: float = 3.5,
+    week_game_counts: list[tuple[int, float]] | None = None,
 ) -> float:
     """Compute a score multiplier based on game count vs league average.
 
-    Uses config.SCHEDULE_WEIGHT to control impact:
-        multiplier = 1.0 + SCHEDULE_WEIGHT × (games - avg)
+    When only *games_this_week* is provided (single-week mode), the
+    multiplier is a simple delta from the league average::
 
-    Example with SCHEDULE_WEIGHT=0.10:
-        4 games → 1.05, 3 games → 0.95, 2 games → 0.85
+        multiplier = 1.0 + SCHEDULE_WEIGHT × (games − avg)
+
+    When *week_game_counts* is provided (multi-week mode), future weeks
+    are discounted by ``SCHEDULE_WEEK_DECAY`` so that this week's games
+    carry more weight than next week's::
+
+        weighted_delta = Σ decay^i × (games_i − avg_i) / Σ decay^i
+        multiplier     = 1.0 + SCHEDULE_WEIGHT × weighted_delta
+
+    Args:
+        games_this_week: Game count for the current week (used in
+            single-week fallback).
+        avg_games: League average games per week (single-week fallback).
+        week_game_counts: Optional list of ``(games, avg_games)`` tuples,
+            one per upcoming week (week 0 = current).  When provided,
+            *games_this_week* and *avg_games* are ignored.
+
+    Returns:
+        Schedule multiplier (centred on 1.0).
     """
+    decay = config.SCHEDULE_WEEK_DECAY
+
+    if week_game_counts and len(week_game_counts) > 1:
+        total_weight = 0.0
+        weighted_delta = 0.0
+        for i, (games_i, avg_i) in enumerate(week_game_counts):
+            w = decay ** i          # 1.0, 0.5, 0.25, …
+            weighted_delta += w * (games_i - avg_i)
+            total_weight += w
+        if total_weight > 0:
+            weighted_delta /= total_weight
+        return round(1.0 + config.SCHEDULE_WEIGHT * weighted_delta, 3)
+
+    # Single-week fallback
     delta = games_this_week - avg_games
     return round(1.0 + config.SCHEDULE_WEIGHT * delta, 3)
 

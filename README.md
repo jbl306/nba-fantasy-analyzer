@@ -6,7 +6,11 @@ Combines **nba_api** (real NBA stats) with **yfpy** (Yahoo Fantasy Sports API) t
 - Scrape current season NBA player stats
 - Compute 9-category z-scores (FG%, FT%, 3PM, PTS, REB, AST, STL, BLK, TO)
 - Analyze your roster's strengths and weaknesses
+- Fetch real-time injury data from ESPN's public API
+- Factor in upcoming schedule density (games per week)
 - Recommend the best available waiver wire pickups tailored to your team's needs
+- Submit waiver claims and FAAB bids directly to Yahoo
+- Auto-resolve IL/IL+ roster moves
 
 ## Setup
 
@@ -59,18 +63,25 @@ python main.py --skip-yahoo
 
 ### Additional Options
 ```bash
-python main.py --top 25          # Show top 25 recommendations
-python main.py --days 7           # Evaluate last 7 days of form
+python main.py --top 25                    # Show top 25 recommendations
+python main.py --days 7                    # Evaluate last 7 days of form
+python main.py --claim                     # Submit a waiver claim interactively
+python main.py --dry-run                   # Preview a claim without submitting
+python main.py --faab-history              # Analyze league FAAB bid history
+python main.py --strategy aggressive       # FAAB bidding strategy (value|competitive|aggressive)
 python main.py --skip-yahoo --top 30
 ```
 
 ## How It Works
 
-1. **Fetch Stats**: Pulls per-game stats for all NBA players from nba_api
+1. **Fetch Stats**: Pulls per-game stats for all NBA players via nba_api (volume-weighted FG%/FT%)
 2. **Z-Score Ranking**: Computes z-scores across all 9 categories to create a single value metric
-3. **Roster Analysis**: Connects to Yahoo Fantasy to analyze your team's category strengths/weaknesses
-4. **Need-Weighted Scoring**: Boosts waiver recommendations for players who fill your weakest categories
-5. **Output**: Ranked table of recommended pickups with stats and z-scores
+3. **Injury Report**: Fetches real-time injury data from ESPN's public JSON API — penalizes injured players (Out For Season → 0.0 multiplier, Out → 0.05, Day-to-Day → partial)
+4. **Schedule Analysis**: Pulls the NBA schedule to weight players with more upcoming games higher (week-decay model)
+5. **Roster Analysis**: Connects to Yahoo Fantasy to analyze your team's category strengths/weaknesses
+6. **Need-Weighted Scoring**: Boosts waiver recommendations for players who fill your weakest categories, with optional punt-category mode
+7. **FAAB Bidding**: Analyzes league bid history (IQR outlier detection) and suggests bids using league-relative tiering
+8. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, and schedule data
 
 ## Project Structure
 
@@ -85,7 +96,12 @@ nba-fantasy-advisor/
     ├── __init__.py
     ├── nba_stats.py        # NBA stats scraping (nba_api)
     ├── yahoo_fantasy.py    # Yahoo Fantasy integration (yfpy)
-    └── waiver_advisor.py   # Recommendation engine
+    ├── waiver_advisor.py   # Recommendation engine
+    ├── injury_news.py      # Injury report via ESPN JSON API
+    ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
+    ├── faab_analyzer.py    # FAAB bid history & suggested bids
+    ├── league_settings.py  # Yahoo league settings & roster rules
+    └── transactions.py     # Waiver claims & IL moves
 ```
 
 ## 9-Category Scoring
@@ -101,3 +117,21 @@ nba-fantasy-advisor/
 | STL | Steals | ✅ |
 | BLK | Blocks | ✅ |
 | TO | Turnovers | ❌ |
+
+## Data Sources
+
+| Data | Source | Method |
+|------|--------|--------|
+| Player stats | [nba_api](https://github.com/swar/nba_api) | `LeagueDashPlayerStats` endpoint |
+| Injury report | [ESPN](https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries) | Public JSON API (no auth required) |
+| NBA schedule | [nba_api](https://github.com/swar/nba_api) | `LeagueGameFinder` / schedule endpoints |
+| Fantasy rosters | [Yahoo Fantasy API](https://developer.yahoo.com/fantasysports/) | OAuth 2.0 via yfpy |
+
+## Dependencies
+
+- **nba_api** — NBA stats and schedule data
+- **yfpy** — Yahoo Fantasy Sports API wrapper
+- **pandas** — Data manipulation
+- **requests** — HTTP client (ESPN injury API)
+- **tabulate** — Terminal table formatting
+- **python-dotenv** — Environment variable management

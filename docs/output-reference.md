@@ -77,7 +77,7 @@ The main output is a ranked table of available waiver wire players.
 | **MIN** | nba_api | Average minutes per game |
 | **Avail%** | Computed | Season availability rate: `GP / Team_GP`. Higher is better. |
 | **Health** | Computed | Season durability flag (see table below) |
-| **Injury** | Scraped | Injury report status from Basketball-Reference (see table below) |
+| **Injury** | ESPN API | Injury report status from ESPN (see table below) |
 | **Recent** | Game Log | Recent activity status with days since last game (see table below) |
 | **G/14d** | Game Log | Number of games played in the last 14 days. 0 likely means injured/out. |
 | **FG%** | nba_api | Field Goal Percentage (per game) |
@@ -106,7 +106,7 @@ Based on season-long games played vs. team games played:
 
 ### Injury Flag
 
-Scraped from Basketball-Reference's injury report:
+Fetched from ESPN's public NBA injury API:
 
 | Value | Meaning | Base Score Multiplier |
 |-------|---------|----------------------|
@@ -188,7 +188,7 @@ After the recommendation table, a separate section lists the detailed injury blu
 
 ```
 ====================================================================================================
-INJURY REPORT NOTES (source: Basketball-Reference)
+INJURY REPORT NOTES (source: ESPN)
 ====================================================================================================
   Walker Kessler            OUT-SEASON (Shoulder) - Kessler will undergo left shoulder surgery...
   Stephen Curry             OUT (Knee) - The Warriors said Curry won't return before the All-Star break...

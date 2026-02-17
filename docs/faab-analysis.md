@@ -23,15 +23,33 @@ The FAAB analyzer solves this problem by:
 
 ## Quality Tiers
 
-Every player (both historical pickups and current waiver candidates) is assigned a quality tier based on their Adj_Score:
+Every player (both historical pickups and current waiver candidates) is assigned a quality tier based on their Adj_Score.
 
-| Tier | Adj_Score Range | Description |
-|------|----------------|-------------|
-| **Elite** | ≥ 6.0 | Top-tier fantasy contributor across multiple categories |
-| **Strong** | 4.0 – 5.99 | Well above average; likely starter value |
-| **Solid** | 2.5 – 3.99 | Reliable contributor; fills a role |
-| **Streamer** | 1.0 – 2.49 | Short-term value; good for weekly streaming |
-| **Dart** | < 1.0 | Speculative; high-upside but inconsistent |
+### League-Relative Tiers (default)
+
+When generating bid suggestions, tier boundaries are computed **dynamically from the current waiver pool's Adj_Score distribution** using percentile cutoffs:
+
+| Tier | Percentile | Meaning |
+|------|-----------|----------|
+| **Elite** | ≥ 90th | Top 10% of available players |
+| **Strong** | 70th – 90th | Above average; likely starter value |
+| **Solid** | 40th – 70th | Reliable contributor; fills a role |
+| **Streamer** | 15th – 40th | Short-term value; good for weekly streaming |
+| **Dart** | < 15th | Speculative; high-upside but inconsistent |
+
+This makes tiers adapt automatically to league depth — a shallow 8-team league and a deep 14-team league will have different Adj_Score cutoffs for "Elite," but the top 10% is always "Elite."
+
+### Fallback (absolute) Tiers
+
+If the waiver pool DataFrame is unavailable or has fewer than 10 players, hard-coded absolute thresholds are used as a fallback:
+
+| Tier | Adj_Score Range |
+|------|----------------|
+| **Elite** | ≥ 6.0 |
+| **Strong** | 4.0 – 5.99 |
+| **Solid** | 2.5 – 3.99 |
+| **Streamer** | 1.0 – 2.49 |
+| **Dart** | < 1.0 |
 
 These tiers are used both for analyzing historical bid distribution and for generating new bid suggestions.
 
@@ -45,7 +63,7 @@ The analyzer calls `query.get_league_transactions()` via yfpy to retrieve every 
 
 - **Player added** (name and player key)
 - **Player dropped** (if add/drop swap)
-- **FAAB bid amount** ($0 for free agent pickups)
+- **FAAB bid amount** ($0 when Yahoo returns no FAAB data — typically a free-agent pickup, but may also occur if the league doesn't use FAAB)
 - **Team** that made the transaction
 - **Transaction type** (add or add/drop)
 
@@ -112,7 +130,7 @@ When suggesting a bid for a waiver candidate, the analyzer maps the player's Adj
 1. The player's Adj_Score determines their quality tier (e.g., `Adj_Score = 4.5` → Strong)
 2. The tier's historical bid distribution is looked up (e.g., Strong tier: median = $9, P25 = $5, P75 = $15)
 3. Based on your strategy, the corresponding percentile is selected as the base bid
-4. Elite tier players get a small bump (+10%) to account for higher competition
+4. Elite tier players get a guaranteed bump (at least +$1 or +10%, whichever is greater) to account for higher competition
 5. If a tier has fewer than 2 historical bids, the system falls back to a score-based heuristic using the league median
 6. **Budget factor** scales the bid based on your remaining budget health (see below)
 7. **Schedule factor** scales the bid based on the player's upcoming game count (see below)

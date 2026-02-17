@@ -31,9 +31,11 @@ from src.yahoo_fantasy import (
 # Quality tiers for bucketing players
 # ---------------------------------------------------------------------------
 
-# Adj_Score thresholds to bucket players into quality tiers.
-# These are applied to the FAAB history data and to new bid suggestions.
-TIER_THRESHOLDS = [
+# *Fallback* Adj_Score thresholds when no waiver-pool data is available.
+# When a recommendations DataFrame is provided, percentile-based thresholds
+# computed from the **current** waiver pool replace these.  This makes tiers
+# adapt to league depth (shallow 8-team vs. deep 14-team leagues).
+DEFAULT_TIER_THRESHOLDS: list[tuple[str, float | None]] = [
     ("Elite",    6.0),   # Adj_Score >= 6.0
     ("Strong",   4.0),   # 4.0 - 5.99
     ("Solid",    2.5),   # 2.5 - 3.99
@@ -41,10 +43,79 @@ TIER_THRESHOLDS = [
     ("Dart",     None),  # < 1.0
 ]
 
+# Kept for backward compatibility — code that references TIER_THRESHOLDS
+# (e.g. display ordering) continues to work.
+TIER_THRESHOLDS = DEFAULT_TIER_THRESHOLDS
 
-def score_to_tier(adj_score: float) -> str:
-    """Map an Adj_Score to a quality tier label."""
-    for tier_name, threshold in TIER_THRESHOLDS:
+# Percentile boundaries used to compute league-relative tiers.
+# These map to the *available waiver pool's* Adj_Score distribution.
+_TIER_PERCENTILES: list[tuple[str, float]] = [
+    ("Elite",    90),   # Top 10%
+    ("Strong",   70),   # 70th–90th percentile
+    ("Solid",    40),   # 40th–70th percentile
+    ("Streamer", 15),   # 15th–40th percentile
+    # Below 15th → "Dart"
+]
+
+# Minimum absolute Adj_Score floors per tier.  The percentile approach
+# adapts to league depth, but without floors a shallow waiver pool can
+# inflate labels (e.g. a 0.48 Adj_Score player being called "Elite").
+# Each tier threshold is the MAX of the percentile-derived value and
+# its floor, so tier labels always carry meaningful absolute weight.
+_TIER_MIN_FLOORS: dict[str, float] = {
+    "Elite":    4.0,
+    "Strong":   2.5,
+    "Solid":    1.5,
+    "Streamer": 0.5,
+}
+
+
+def compute_relative_tiers(rec_df: pd.DataFrame) -> list[tuple[str, float | None]]:
+    """Compute tier thresholds from the current waiver pool's Adj_Score.
+
+    Uses percentile boundaries so tier labels reflect the league's actual
+    talent distribution rather than hard-coded score cutoffs.  Each
+    percentile-derived threshold is clamped to a minimum absolute floor
+    so that tier labels remain meaningful when the pool is weak.
+
+    Args:
+        rec_df: Recommendations DataFrame with an ``Adj_Score`` column.
+
+    Returns:
+        Tier thresholds list in the same format as ``DEFAULT_TIER_THRESHOLDS``.
+    """
+    if rec_df is None or rec_df.empty or "Adj_Score" not in rec_df.columns:
+        return list(DEFAULT_TIER_THRESHOLDS)
+
+    scores = rec_df["Adj_Score"].dropna().astype(float)
+    if len(scores) < 10:
+        return list(DEFAULT_TIER_THRESHOLDS)
+
+    import numpy as np
+    thresholds: list[tuple[str, float | None]] = []
+    for tier_name, pct in _TIER_PERCENTILES:
+        pct_value = round(float(np.percentile(scores, pct)), 2)
+        floor = _TIER_MIN_FLOORS.get(tier_name, 0.0)
+        thresholds.append((tier_name, max(pct_value, floor)))
+    thresholds.append(("Dart", None))
+    return thresholds
+
+
+def score_to_tier(
+    adj_score: float,
+    tier_thresholds: list[tuple[str, float | None]] | None = None,
+) -> str:
+    """Map an Adj_Score to a quality tier label.
+
+    Args:
+        adj_score: The player's adjusted score.
+        tier_thresholds: Custom tier thresholds (from
+            :func:`compute_relative_tiers`).  Falls back to
+            ``DEFAULT_TIER_THRESHOLDS`` when ``None``.
+    """
+    if tier_thresholds is None:
+        tier_thresholds = DEFAULT_TIER_THRESHOLDS
+    for tier_name, threshold in tier_thresholds:
         if threshold is not None and adj_score >= threshold:
             return tier_name
     return "Dart"
@@ -94,8 +165,11 @@ def fetch_league_transactions(query) -> list[dict[str, Any]]:
         # FAAB bid — may be int, str, or missing
         faab_bid = _get_faab_bid(txn)
         if faab_bid is None:
-            # No FAAB data — skip (league may not use FAAB, or it's a free pickup)
-            # Still include with bid=0 for free agent pickups
+            # Yahoo didn't return a FAAB amount for this transaction.
+            # This typically means it was a $0 free-agent pickup, but can
+            # also occur when the league doesn't use FAAB.  We record it as
+            # $0 so the free-pickup count stays accurate; downstream code
+            # separates free ($0) from paid (>$0) bids.
             faab_bid = 0
 
         # Parse player data
@@ -306,17 +380,20 @@ def analyze_bid_history(
             norm = normalize_name(str(row["Player"]))
             score_lookup[norm] = float(row.get("Adj_Score", 0))
 
+    # Compute league-relative tier thresholds from the waiver pool
+    tier_thresholds = compute_relative_tiers(rec_df)
+
     # Separate FAAB bids from free pickups
     faab_bids = [t for t in transactions if t["faab_bid"] > 0]
     free_pickups = [t for t in transactions if t["faab_bid"] == 0]
 
-    # Assign tiers where possible
+    # Assign tiers where possible (using relative thresholds)
     for txn in transactions:
         norm = normalize_name(txn["add_player_name"])
         score = score_lookup.get(norm, None)
         if score is not None:
             txn["adj_score"] = score
-            txn["tier"] = score_to_tier(score)
+            txn["tier"] = score_to_tier(score, tier_thresholds)
         else:
             txn["adj_score"] = None
             txn["tier"] = "Unknown"
@@ -410,6 +487,7 @@ def analyze_bid_history(
         "premium_summary": premium_summary,
         "outlier_threshold": outlier_threshold,
         "your_bids": your_bids,
+        "tier_thresholds": tier_thresholds,
     }
 
 
@@ -455,7 +533,7 @@ def suggest_bid(
     Returns:
         Dict with suggested bid, reasoning, and optional premium_range.
     """
-    tier = score_to_tier(adj_score)
+    tier = score_to_tier(adj_score, analysis.get("tier_thresholds"))
     tier_data = analysis.get("by_tier", {}).get(tier, None)
 
     suggestion = {
@@ -524,9 +602,10 @@ def suggest_bid(
         suggestion["reason"] = f"Median for {tier} tier (market rate, std bids)"
 
     # Adjust for player quality within the tier
-    tier_index = [t[0] for t in TIER_THRESHOLDS].index(tier)
+    thresholds_used = analysis.get("tier_thresholds") or DEFAULT_TIER_THRESHOLDS
+    tier_index = [t[0] for t in thresholds_used].index(tier)
     if tier_index == 0:  # Elite — bump up slightly
-        bid = max(bid, int(bid * 1.1))
+        bid = bid + max(1, int(round(bid * 0.1)))
 
     # Apply budget and schedule adjustments
     bid = _apply_budget_schedule_adjustments(

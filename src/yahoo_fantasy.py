@@ -4,7 +4,9 @@ Connects to your Yahoo Fantasy Basketball league to retrieve roster info,
 all teams' rosters, free agents, and league settings.
 """
 
+import logging
 import os
+import unicodedata
 from pathlib import Path
 
 from yfpy.query import YahooFantasySportsQuery
@@ -12,15 +14,46 @@ from yfpy.query import YahooFantasySportsQuery
 import config
 
 
+def _patch_get_response(query: YahooFantasySportsQuery) -> None:
+    """Patch yfpy's get_response to retry after 401 re-authentication.
+
+    yfpy's get_response refreshes the OAuth token on a 401, but then
+    continues processing the *original* failed response instead of
+    retrying the request with the new token.  This wrapper catches the
+    resulting error and retries once — by which point the token has
+    already been refreshed internally by yfpy.
+    """
+    _original = query.get_response
+
+    def _get_response_with_retry(url: str):
+        try:
+            return _original(url)
+        except Exception as exc:
+            if "logged in" in str(exc).lower():
+                logging.getLogger("yfpy.query").debug(
+                    "Retrying after Yahoo auth refresh..."
+                )
+                return _original(url)
+            raise
+
+    query.get_response = _get_response_with_retry
+
+
 def create_yahoo_query() -> YahooFantasySportsQuery:
     """Create and return an authenticated YahooFantasySportsQuery instance.
 
     Uses environment variables for authentication. On first run, a browser
-    window will open for OAuth2 authorization.
+    window will open for OAuth2 authorization.  The Yahoo game_id (which
+    changes every season) is resolved automatically via the API.
 
     Returns:
         Configured YahooFantasySportsQuery for your NBA fantasy league.
     """
+    # Temporarily suppress yfpy's "No game id" warning while we resolve it.
+    yfpy_logger = logging.getLogger("yfpy.query")
+    prev_level = yfpy_logger.level
+    yfpy_logger.setLevel(logging.ERROR)
+
     query = YahooFantasySportsQuery(
         league_id=config.YAHOO_LEAGUE_ID,
         game_code=config.YAHOO_GAME_CODE,
@@ -29,6 +62,17 @@ def create_yahoo_query() -> YahooFantasySportsQuery:
         env_file_location=config.PROJECT_DIR,
         save_token_data_to_env_file=True,
     )
+
+    # Auto-resolve game_id for the current season so it never goes stale.
+    game_info = query.get_current_game_info()
+    query.game_id = game_info.game_id
+
+    yfpy_logger.setLevel(prev_level)
+
+    # Work around yfpy bug: on 401 it refreshes the token but doesn't
+    # retry the request, so the caller sees "You must be logged in".
+    _patch_get_response(query)
+
     return query
 
 
@@ -103,8 +147,16 @@ def get_my_team_roster(
 
 
 def normalize_name(name: str) -> str:
-    """Normalize a player name for matching."""
-    return name.strip().lower().replace(".", "").replace("'", "").replace("-", " ")
+    """Normalize a player name for matching.
+
+    Strips diacritics (Dončić → Doncic), punctuation, and casing so that
+    names from Yahoo Fantasy and NBA API reliably match even when one source
+    uses Unicode and the other uses ASCII transliterations.
+    """
+    # Decompose Unicode characters and drop combining marks (accents)
+    nfkd = unicodedata.normalize("NFKD", name)
+    ascii_name = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return ascii_name.strip().lower().replace(".", "").replace("'", "").replace("-", " ")
 
 
 def extract_player_name(player_obj) -> str:
