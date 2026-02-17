@@ -404,7 +404,6 @@ Kristaps Porziņģis     GSW           4      3.55     14.2
 
 Results saved to /home/jbl/projects/nba-fantasy-advisor/output/waiver_recommendations.csv
   Fetching league settings from Yahoo...
-  Warning: could not fetch FAAB balance from Yahoo: YahooFantasySportsQuery.get_team_info() missing 1 required positional argument: 'team_id'
 
 Fetching league transaction history...
   Found 207 add/drop transactions
@@ -498,17 +497,17 @@ Jonathan Kuminga          $18    standard    Dabham            -
 ======================================================================
 
     Player               Adj_Score  Tier        Games  Bid    Premium    Confidence    Reason
---  -----------------  -----------  --------  -------  -----  ---------  ------------  -------------------------------------------------------------------------
- 0  Sam Merrill               1.95  Solid           5  $3     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: HEALTHY, 5G this week)
- 1  Julian Champagnie         1.8   Solid           4  $3     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: HEALTHY, 4G this week)
- 2  Max Christie              1.72  Solid           4  $3     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: HEALTHY, 4G this week)
- 3  Jay Huff                  1.7   Solid           5  $3     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: HEALTHY, 5G this week)
- 4  Reed Sheppard             1.5   Solid           4  $3     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: HEALTHY, 4G this week)
- 5  Royce O'Neale             1.45  Streamer        5  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: HEALTHY, 5G this week)
- 6  Moses Moody               0.97  Streamer        4  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: HEALTHY, 4G this week)
- 7  Neemias Queta             0.84  Streamer        3  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: HEALTHY, 3G this week)
- 8  Al Horford                0.72  Streamer        4  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: HEALTHY, 4G this week)
- 9  Derrick Jones Jr.         0.48  Dart            5  $2     $31-$113   high          P25 for Dart tier (bargain, std bids) (Budget: HEALTHY, 5G this week)
+--  -----------------  -----------  --------  -------  -----  ---------  ------------  -----------------------------------------------------------------------
+ 0  Sam Merrill               1.95  Solid           5  $2     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: TIGHT, 5G this week)
+ 1  Julian Champagnie         1.8   Solid           4  $2     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: TIGHT, 4G this week)
+ 2  Max Christie              1.72  Solid           4  $2     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: TIGHT, 4G this week)
+ 3  Jay Huff                  1.7   Solid           5  $2     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: TIGHT, 5G this week)
+ 4  Reed Sheppard             1.5   Solid           4  $2     $31-$113   high          P25 for Solid tier (bargain, std bids) (Budget: TIGHT, 4G this week)
+ 5  Royce O'Neale             1.45  Streamer        5  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: TIGHT, 5G this week)
+ 6  Moses Moody               0.97  Streamer        4  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: TIGHT, 4G this week)
+ 7  Neemias Queta             0.84  Streamer        3  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: TIGHT, 3G this week)
+ 8  Al Horford                0.72  Streamer        4  $1     $31-$113   medium        P25 for Streamer tier (bargain, std bids) (Budget: TIGHT, 4G this week)
+ 9  Derrick Jones Jr.         0.48  Dart            5  $1     $31-$113   high          P25 for Dart tier (bargain, std bids) (Budget: TIGHT, 5G this week)
 
 Strategies: value (bargain) | competitive (market rate) | aggressive (ensure win)
 Premium column shows the historical range for returning-star / outlier bids.
@@ -518,17 +517,17 @@ Premium column shows the historical range for returning-star / outlier bids.
 ======================================================================
 
     Player               Adj_Score  Tier        Games  Bid    Premium    Confidence    Reason
---  -----------------  -----------  --------  -------  -----  ---------  ------------  --------------------------------------------------------------------------------
- 0  Sam Merrill               1.95  Solid           5  $3     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 5G this week)
- 1  Julian Champagnie         1.8   Solid           4  $3     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 4G this week)
- 2  Max Christie              1.72  Solid           4  $3     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 4G this week)
- 3  Jay Huff                  1.7   Solid           5  $3     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 5G this week)
- 4  Reed Sheppard             1.5   Solid           4  $3     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 4G this week)
- 5  Royce O'Neale             1.45  Streamer        5  $5     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: HEALTHY, 5G this week)
- 6  Moses Moody               0.97  Streamer        4  $4     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: HEALTHY, 4G this week)
- 7  Neemias Queta             0.84  Streamer        3  $3     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: HEALTHY, 3G this week)
- 8  Al Horford                0.72  Streamer        4  $4     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: HEALTHY, 4G this week)
- 9  Derrick Jones Jr.         0.48  Dart            5  $6     $31-$113   high          Median for Dart tier (market rate, std bids) (Budget: HEALTHY, 5G this week)
+--  -----------------  -----------  --------  -------  -----  ---------  ------------  ------------------------------------------------------------------------------
+ 0  Sam Merrill               1.95  Solid           5  $2     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: TIGHT, 5G this week)
+ 1  Julian Champagnie         1.8   Solid           4  $2     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: TIGHT, 4G this week)
+ 2  Max Christie              1.72  Solid           4  $2     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: TIGHT, 4G this week)
+ 3  Jay Huff                  1.7   Solid           5  $2     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: TIGHT, 5G this week)
+ 4  Reed Sheppard             1.5   Solid           4  $2     $31-$113   high          Median for Solid tier (market rate, std bids) (Budget: TIGHT, 4G this week)
+ 5  Royce O'Neale             1.45  Streamer        5  $3     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: TIGHT, 5G this week)
+ 6  Moses Moody               0.97  Streamer        4  $3     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: TIGHT, 4G this week)
+ 7  Neemias Queta             0.84  Streamer        3  $2     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: TIGHT, 3G this week)
+ 8  Al Horford                0.72  Streamer        4  $3     $31-$113   medium        Median for Streamer tier (market rate, std bids) (Budget: TIGHT, 4G this week)
+ 9  Derrick Jones Jr.         0.48  Dart            5  $5     $31-$113   high          Median for Dart tier (market rate, std bids) (Budget: TIGHT, 5G this week)
 
 Strategies: value (bargain) | competitive (market rate) | aggressive (ensure win)
 Premium column shows the historical range for returning-star / outlier bids.
@@ -538,17 +537,17 @@ Premium column shows the historical range for returning-star / outlier bids.
 ======================================================================
 
     Player               Adj_Score  Tier        Games  Bid    Premium    Confidence    Reason
---  -----------------  -----------  --------  -------  -----  ---------  ------------  ---------------------------------------------------------------------------------
- 0  Sam Merrill               1.95  Solid           5  $5     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: HEALTHY, 5G this week)
- 1  Julian Champagnie         1.8   Solid           4  $4     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: HEALTHY, 4G this week)
- 2  Max Christie              1.72  Solid           4  $4     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: HEALTHY, 4G this week)
- 3  Jay Huff                  1.7   Solid           5  $5     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: HEALTHY, 5G this week)
- 4  Reed Sheppard             1.5   Solid           4  $4     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: HEALTHY, 4G this week)
- 5  Royce O'Neale             1.45  Streamer        5  $10    $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: HEALTHY, 5G this week)
- 6  Moses Moody               0.97  Streamer        4  $8     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: HEALTHY, 4G this week)
- 7  Neemias Queta             0.84  Streamer        3  $7     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: HEALTHY, 3G this week)
- 8  Al Horford                0.72  Streamer        4  $8     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: HEALTHY, 4G this week)
- 9  Derrick Jones Jr.         0.48  Dart            5  $8     $31-$113   high          P75 for Dart tier (higher win rate, std bids) (Budget: HEALTHY, 5G this week)
+--  -----------------  -----------  --------  -------  -----  ---------  ------------  -------------------------------------------------------------------------------
+ 0  Sam Merrill               1.95  Solid           5  $3     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: TIGHT, 5G this week)
+ 1  Julian Champagnie         1.8   Solid           4  $3     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: TIGHT, 4G this week)
+ 2  Max Christie              1.72  Solid           4  $3     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: TIGHT, 4G this week)
+ 3  Jay Huff                  1.7   Solid           5  $3     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: TIGHT, 5G this week)
+ 4  Reed Sheppard             1.5   Solid           4  $3     $31-$113   high          P75 for Solid tier (higher win rate, std bids) (Budget: TIGHT, 4G this week)
+ 5  Royce O'Neale             1.45  Streamer        5  $7     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: TIGHT, 5G this week)
+ 6  Moses Moody               0.97  Streamer        4  $6     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: TIGHT, 4G this week)
+ 7  Neemias Queta             0.84  Streamer        3  $5     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: TIGHT, 3G this week)
+ 8  Al Horford                0.72  Streamer        4  $6     $31-$113   medium        P75 for Streamer tier (higher win rate, std bids) (Budget: TIGHT, 4G this week)
+ 9  Derrick Jones Jr.         0.48  Dart            5  $6     $31-$113   high          P75 for Dart tier (higher win rate, std bids) (Budget: TIGHT, 5G this week)
 
 Strategies: value (bargain) | competitive (market rate) | aggressive (ensure win)
 Premium column shows the historical range for returning-star / outlier bids.
@@ -562,7 +561,7 @@ FAAB history saved to /home/jbl/projects/nba-fantasy-advisor/output/faab_analysi
 
   2 transactions remaining this week (1/3)
 
-  FAAB Budget: $300 remaining | $150.0/wk | Status: HEALTHY | Max bid: $150
+  FAAB Budget: $239 remaining | $119.5/wk | Status: TIGHT | Max bid: $119
 
 Checking IL/IL+ roster compliance...
   ✓ IL/IL+ slots are compliant
@@ -573,23 +572,23 @@ Your droppable players (3):
   3. Kristaps Porziņģis             (466.p.5464)
 
 Top 10 waiver recommendations:
-   1. Sam Merrill                  CLE   Score:   1.95  5G  ~$3
-   2. Julian Champagnie            SAS   Score:   1.80  4G  ~$3
-   3. Max Christie                 DAL   Score:   1.72  4G  ~$3
-   4. Jay Huff                     IND   Score:   1.70  5G  ~$3
-   5. Reed Sheppard                HOU   Score:   1.50  4G  ~$3
-   6. Royce O'Neale                PHX   Score:   1.45  5G  ~$5
-   7. Moses Moody                  GSW   Score:   0.97  4G  ~$4
-   8. Neemias Queta                BOS   Score:   0.84  3G  ~$3
-   9. Al Horford                   GSW   Score:   0.72  4G  ~$4
-  10. Derrick Jones Jr.            LAC   Score:   0.48  5G  ~$6
+   1. Sam Merrill                  CLE   Score:   1.95  5G  ~$2
+   2. Julian Champagnie            SAS   Score:   1.80  4G  ~$2
+   3. Max Christie                 DAL   Score:   1.72  4G  ~$2
+   4. Jay Huff                     IND   Score:   1.70  5G  ~$2
+   5. Reed Sheppard                HOU   Score:   1.50  4G  ~$2
+   6. Royce O'Neale                PHX   Score:   1.45  5G  ~$3
+   7. Moses Moody                  GSW   Score:   0.97  4G  ~$3
+   8. Neemias Queta                BOS   Score:   0.84  3G  ~$2
+   9. Al Horford                   GSW   Score:   0.72  4G  ~$3
+  10. Derrick Jones Jr.            LAC   Score:   0.48  5G  ~$5
 
 Select player to DROP (1-3, or 'q' to finish): 2
 Select player to ADD (1-10, or 'q' to finish): 1
-  Suggested bid: $3 (Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 5G this week))
+  Suggested bid: $2 (Median for Solid tier (market rate, std bids) (Budget: TIGHT, 5G this week))
   Premium range: $31-$113 (6 returning-star bids in history)
-  Budget: $300 remaining | Max bid: $150
-  FAAB bid amount ($3 suggested, or enter amount): 3
+  Budget: $239 remaining | Max bid: $119
+  FAAB bid amount ($2 suggested, or enter amount): 3
   ✓ Queued: ADD Sam Merrill / DROP Justin Champagnie / $3
 
 Add another bid? (y/n): y
@@ -599,11 +598,11 @@ Add another bid? (y/n): y
 ──────────────────────────────────────────────────
 Select player to DROP (1-3, or 'q' to finish): 2
 Select player to ADD (1-10, or 'q' to finish): 3
-  Suggested bid: $3 (Median for Solid tier (market rate, std bids) (Budget: HEALTHY, 4G this week))
+  Suggested bid: $2 (Median for Solid tier (market rate, std bids) (Budget: TIGHT, 4G this week))
   Premium range: $31-$113 (6 returning-star bids in history)
-  Budget: $300 remaining | Max bid: $150
-  FAAB bid amount ($3 suggested, or enter amount):
-  ✓ Queued: ADD Max Christie / DROP Justin Champagnie / $3
+  Budget: $239 remaining | Max bid: $119
+  FAAB bid amount ($2 suggested, or enter amount):
+  ✓ Queued: ADD Max Christie / DROP Justin Champagnie / $2
 
 Add another bid? (y/n): n
 
@@ -611,7 +610,7 @@ Add another bid? (y/n): n
   QUEUED CLAIMS (2 total)
 ============================================================
   1. ADD: Sam Merrill               DROP: Justin Champagnie  FAAB: $3
-  2. ADD: Max Christie              DROP: Justin Champagnie  FAAB: $3
+  2. ADD: Max Christie              DROP: Justin Champagnie  FAAB: $2
 ============================================================
 
   [1/2] Processing...
@@ -642,12 +641,12 @@ Add another bid? (y/n): n
   [DRY RUN] Would submit add/drop transaction:
     ADD:  Max Christie (466.p.6725)
     DROP: Justin Champagnie (466.p.6632)
-    FAAB Bid: $3
+    FAAB Bid: $2
     Team: 466.l.94443.t.9
 
   XML payload:
 <?xml version='1.0' encoding='utf-8'?>
-<fantasy_content><transaction><type>add/drop</type><faab_bid>3</faab_bid><players><player><player_key>466.p.6725</player_key><transaction_data><type>add</type><destination_team_key>466.l.94443.t.9</destination_team_key></transaction_data></player><player><player_key>466.p.6632</player_key><transaction_data><type>drop</type><source_team_key>466.l.94443.t.9</source_team_key></transaction_data></player></players></transaction></fantasy_content>
+<fantasy_content><transaction><type>add/drop</type><faab_bid>2</faab_bid><players><player><player_key>466.p.6725</player_key><transaction_data><type>add</type><destination_team_key>466.l.94443.t.9</destination_team_key></transaction_data></player><player><player_key>466.p.6632</player_key><transaction_data><type>drop</type><source_team_key>466.l.94443.t.9</source_team_key></transaction_data></player></players></transaction></fantasy_content>
   ✓ [DRY RUN] Transaction prepared but not submitted.
 
 ==================================================

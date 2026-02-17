@@ -6,12 +6,16 @@ all teams' rosters, free agents, and league settings.
 
 import logging
 import os
+import time
 import unicodedata
 from pathlib import Path
 
 from yfpy.query import YahooFantasySportsQuery
 
 import config
+
+_AUTH_RETRIES = 3
+_AUTH_BACKOFF = 1.0  # seconds; doubles each retry
 
 
 def _patch_get_response(query: YahooFantasySportsQuery) -> None:
@@ -20,21 +24,32 @@ def _patch_get_response(query: YahooFantasySportsQuery) -> None:
     yfpy's get_response refreshes the OAuth token on a 401, but then
     continues processing the *original* failed response instead of
     retrying the request with the new token.  This wrapper catches the
-    resulting error and retries once — by which point the token has
-    already been refreshed internally by yfpy.
+    resulting error, forces a fresh re-authentication with back-off,
+    and retries up to ``_AUTH_RETRIES`` times.
     """
     _original = query.get_response
+    _logger = logging.getLogger("yfpy.query")
 
     def _get_response_with_retry(url: str):
-        try:
-            return _original(url)
-        except Exception as exc:
-            if "logged in" in str(exc).lower():
-                logging.getLogger("yfpy.query").debug(
-                    "Retrying after Yahoo auth refresh..."
-                )
+        last_exc: Exception | None = None
+        for attempt in range(_AUTH_RETRIES):
+            try:
                 return _original(url)
-            raise
+            except Exception as exc:
+                if "logged in" not in str(exc).lower():
+                    raise
+                last_exc = exc
+                wait = _AUTH_BACKOFF * (attempt + 1)
+                _logger.debug(
+                    "Yahoo auth error — re-authenticating and retrying "
+                    "in %.1fs (attempt %d/%d)…",
+                    wait, attempt + 1, _AUTH_RETRIES,
+                )
+                time.sleep(wait)
+                # Force a full token refresh before the next attempt so
+                # the session carries a valid access token.
+                query._authenticate()
+        raise last_exc  # type: ignore[misc]
 
     query.get_response = _get_response_with_retry
 

@@ -79,7 +79,7 @@ def get_faab_balance(query) -> int | None:
         Remaining FAAB dollars or None if not available.
     """
     try:
-        team_data = query.get_team_info()
+        team_data = query.get_team_info(config.YAHOO_TEAM_ID)
         for attr in ("faab_balance", "waiver_budget", "clinched_playoffs"):
             val = getattr(team_data, attr, None)
             if val is not None:
