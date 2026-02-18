@@ -168,7 +168,7 @@ def _format_html_report(
         wk = schedule_analysis["weeks"][0]
         sched_summary = (
             f"<p style='color:#666;font-size:13px;'>"
-            f"📅 Week {wk.get('week', '?')}: {wk.get('start_date', '?')} – {wk.get('end_date', '?')} "
+            f"📅 {wk.get('label', 'Week ?')}: {wk.get('start', '?')} – {wk.get('end', '?')} "
             f"| Avg {schedule_analysis.get('avg_games_per_week', '?')} games/team</p>"
         )
 

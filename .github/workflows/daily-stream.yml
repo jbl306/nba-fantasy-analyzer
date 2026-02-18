@@ -7,7 +7,7 @@
 #   - Manual:    Run from the Actions tab whenever you want during the day
 #   - Automatic: 12:30 AM ET (05:30 UTC) every day — after evening games finish
 #
-# Uses the same secrets as nightly-watch.yml — see that file for setup.
+# Uses the same secrets and variables as nightly-watch.yml — see that file for setup.
 # ────────────────────────────────────────────────────────────────────
 
 name: "Daily Streaming Picks"
@@ -41,13 +41,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build .env from secrets
+      - name: Build .env from secrets and variables
         run: |
-          cat > .env << 'ENVEOF'
+          cat > .env << ENVEOF
           YAHOO_CONSUMER_KEY=${{ secrets.YAHOO_CONSUMER_KEY }}
           YAHOO_CONSUMER_SECRET=${{ secrets.YAHOO_CONSUMER_SECRET }}
-          YAHOO_LEAGUE_ID=${{ secrets.YAHOO_LEAGUE_ID }}
-          YAHOO_TEAM_ID=${{ secrets.YAHOO_TEAM_ID }}
+          YAHOO_LEAGUE_ID=${{ vars.YAHOO_LEAGUE_ID }}
+          YAHOO_TEAM_ID=${{ vars.YAHOO_TEAM_ID }}
           YAHOO_GAME_CODE=nba
           YAHOO_ACCESS_TOKEN=${{ secrets.YAHOO_ACCESS_TOKEN }}
           YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
