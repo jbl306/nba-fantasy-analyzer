@@ -166,16 +166,39 @@ Before any transaction can be submitted, the tool checks your IL and IL+ roster 
 | **IL** | INJ, O, SUSP |
 | **IL+** | INJ, O, GTD, DTD, SUSP |
 
-If a player in an IL slot has recovered (no longer has an eligible status), Yahoo **blocks all transactions** for your team. The tool detects this and auto-resolves it in two steps:
+If a player in an IL slot has recovered (no longer has an eligible status), Yahoo **blocks all transactions** for your team. Because IL/IL+ slots sit outside the normal roster max, resolving a violation when the roster is full requires **two drops** — one to clear the IL violation and one for the actual waiver add/drop claim. The tool handles this automatically with two mode-specific strategies:
 
-1. **Drop a player** from the droppable list (auto-detected or manual) to free a roster spot
-2. **Move the non-compliant IL player** to the bench (BN) via a roster position PUT
+#### Claim flow (interactive `--claim` / `--dry-run`)
 
-This happens automatically — no manual intervention on the Yahoo website needed. The consumed droppable player(s) are then removed from the available list for the subsequent waiver bids.
+Uses the **drop_il** strategy — the recovered IL player is dropped directly from the roster:
 
-**Example:** If you have 3 droppable players (auto-detected or manual) and 1 IL violation, the tool drops player #1 to resolve IL, then shows the remaining 2 players as options for your FAAB bid.
+1. **Drop the non-compliant IL/IL+ player** via a standalone drop transaction.
+2. IL violation is cleared AND a roster spot is freed.
+3. All regular droppable players are preserved for waiver bids.
 
-If there aren't enough droppable players to cover both IL resolution AND at least one waiver bid, the tool will warn you and suggest increasing `AUTO_DROPPABLE_COUNT` (auto mode) or adding players to `DROPPABLE_PLAYERS` (manual mode).
+This is the most efficient approach: one drop clears the IL slot, and the user still has the full droppable list available for add/drop claims.
+
+#### Streaming flow (`--stream`, `--stream --watch`)
+
+> **Note:** Streaming mode targets **tomorrow's NBA games** (not today). This matches overnight FAAB auction leagues where you cannot pick up players for same-day games.
+
+Uses the **smart evaluation** strategy — compares z-scores to decide the best move:
+
+1. **Get the IL player's z-score** and the **worst regular roster player's z-score**.
+2. If the IL player's z-score is within `IL_SMART_DROP_Z_THRESHOLD` (default: 0.5) of the worst regular player (or better):
+   - **Drop the worst regular player** and **move the IL player to bench** — the IL player replaces the weakest roster player as a roster upgrade.
+   - No streaming add/drop is needed; the IL activation IS the next day's roster improvement.
+3. If the IL player is significantly worse (more than 0.5 z-score below the worst regular):
+   - **Drop the IL player** directly (same as claim flow).
+   - Proceed with normal streaming recommendations for tomorrow's games.
+
+**Config:** `IL_SMART_DROP_Z_THRESHOLD` in config.py (default `0.5`). Increase to make the tool more eager to keep IL players; decrease to prefer dropping them.
+
+**Example (claim flow):** You have 3 droppable players and 1 IL violation. The tool drops the IL player directly (no droppable consumed), then shows all 3 droppable players as options for your FAAB bids.
+
+**Example (streaming flow):** Your IL player has z-score +1.2 and your worst regular player has z-score -0.3. Since +1.2 > -0.3, the tool recommends dropping the regular player and activating the IL player — a significant roster upgrade with no waiver transaction needed.
+
+If there aren't enough droppable players to cover IL resolution (in `drop_regular` strategy) AND at least one waiver bid, the tool will warn you and suggest increasing `AUTO_DROPPABLE_COUNT` (auto mode) or adding players to `DROPPABLE_PLAYERS` (manual mode).
 
 ### 1. Player key resolution
 
@@ -331,7 +354,8 @@ Several safeguards prevent accidental transactions:
 src/transactions.py
 ├── IL/IL+ compliance
 │   ├── check_il_compliance()            # Scan roster for IL violations
-│   └── resolve_il_violations()          # Auto-drop + move IL player to BN
+│   ├── evaluate_il_resolution()         # Decide strategy per violation (drop_il vs drop_regular)
+│   └── resolve_il_violations()          # Execute strategy: drop IL player or drop regular + move IL→BN
 ├── Player key resolution
 │   ├── find_player_key_on_roster()      # Drop player → key
 │   ├── find_player_key_from_recommendations()  # Add player → key

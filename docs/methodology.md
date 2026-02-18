@@ -50,7 +50,7 @@ The recommendation engine runs a multi-step pipeline, with optional FAAB analysi
 │     Multi-bid add/drop with roster impact preview│
 ├──────────────────────────────────────────────────┤
 │  S. Streaming mode (optional, --stream)          │
-│     Best pickup with a game TODAY                │
+│     Best pickup with a game TOMORROW             │
 ├──────────────────────────────────────────────────┤
 │  D. League discovery (--list-leagues/--list-teams)│
 │     Show leagues, teams, IDs                     │
@@ -185,7 +185,7 @@ $$
 Z\_Total = \sum_{c \notin \text{punt}} z_c
 $$
 
-A higher Z_Total means the player contributes positively across more categories. If no categories are punted, this is the sum of all 9 z-scores.
+A higher `Z_Total` means the player contributes positively across more categories. If no categories are punted, this is the sum of all 9 z-scores.
 
 ---
 
@@ -202,7 +202,7 @@ PUNT_CATEGORIES = ["BLK", "REB"]  # example: punt blocks and boards
 
 When punt mode is active:
 
-1. **Z_Total** excludes punted categories — a big man's block value won't inflate rankings if you're punting blocks.
+1. `Z_Total` excludes punted categories — a big man's block value won't inflate rankings if you're punting blocks.
 2. **Team needs analysis** ignores punted categories — they won't appear as "weaknesses" you should address.
 3. **Need-weighted boost** only considers non-punted categories — recommendations focus on your actual competitive categories.
 4. **Individual z-score columns are still computed** — you can still see what a player does in punted cats, they just don't affect rankings.
@@ -234,7 +234,7 @@ $$
 
 This means a player who is strong in your weak categories will rank higher than a generically good player who duplicates your existing strengths.
 
-**Example:** If your team is weak in blocks and steals, a player with z_BLK = +2.0 and z_STL = +1.5 gets a bonus of `(2.0 + 1.5) × 0.5 = 1.75` added to their base score.
+**Example:** If your team is weak in blocks and steals, a player with $z_{BLK}$ = +2.0 and $z_{STL}$ = +1.5 gets a bonus of `(2.0 + 1.5) × 0.5 = 1.75` added to their base score.
 
 ---
 
@@ -348,7 +348,7 @@ This means two "Out" players can receive very different penalties based on their
 Putting it all together:
 
 $$
-Adj\_Score = \overbrace{\left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{injury} \times M_{schedule}}^{\text{multiplicative core}} + \overbrace{B_{recency} + B_{trending}}^{\text{additive boosts}}
+Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{injury} \times M_{schedule} + B_{recency} + B_{trending}
 $$
 
 Where:
@@ -357,7 +357,7 @@ Where:
 - $M_{avail}$ = season availability × recent activity multiplier (stacked: e.g. 0.85 × 0.75)
 - $M_{injury}$ = injury/suspension report multiplier (0.0 to 1.0; 1.0 if not on report)
 - $M_{schedule}$ = schedule multiplier based on team games vs league average (see [Schedule Analysis](schedule-analysis.md))
-- $B_{recency}$ = `HOT_PICKUP_RECENCY_WEIGHT` × z_delta (only when positive; 0 otherwise)
+- $B_{recency}$ = `HOT_PICKUP_RECENCY_WEIGHT` × `z_delta` (only when positive; 0 otherwise)
 - $B_{trending}$ = `HOT_PICKUP_TRENDING_WEIGHT` × min(Δ%Own / 10, 3.0) (only when 📈 trending)
 
 ### Multiplicative Core
@@ -384,15 +384,16 @@ Players are sorted by `Adj_Score` descending. The top N (default: 15) are displa
 
 ## Streaming Mode
 
-Streaming mode (`--stream`) is a specialised analysis for daily add/drop strategies. Instead of recommending the overall best waiver pickups, it focuses on finding the best available player **with a game today**.
+Streaming mode (`--stream`) is a specialised analysis for daily add/drop strategies. Instead of recommending the overall best waiver pickups, it focuses on finding the best available player **with a game tomorrow**. This targets the next day's slate because overnight FAAB auction leagues do not allow same-day pickups.
 
 ### Flow
 
-1. Fetch today's NBA schedule to identify which teams play
-2. Filter the waiver pool to only players on teams with a game today
+1. Fetch tomorrow's NBA schedule to identify which teams play
+2. Filter the waiver pool to only players on teams with a game tomorrow
 3. Analyse your roster to identify the weakest spot (lowest z-score player)
-4. Score streaming candidates using the same need-weighted algorithm (without schedule multiplier, since all candidates have exactly 1 game today)
-5. Show the top picks with a roster impact preview for the #1 recommendation
+4. Check IL/IL+ compliance — if a recovered IL player is close in z-score to your worst regular player, recommend activating them as a roster upgrade instead of streaming
+5. Score streaming candidates using the same need-weighted algorithm (without schedule multiplier, since all candidates have exactly 1 game tomorrow)
+6. Show the top picks with a roster impact preview for the #1 recommendation
 
 This is designed for managers who aggressively stream their bottom roster spot to maximise weekly counting stats.
 

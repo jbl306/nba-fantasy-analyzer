@@ -72,6 +72,7 @@ def _format_html_report(
     schedule_analysis: dict | None = None,
     top_n: int = 15,
     mode: str = "watch",
+    il_action: dict | None = None,
 ) -> str:
     """Build an HTML email body from the recommendation DataFrame."""
     now = datetime.now().strftime("%A %B %d, %Y at %I:%M %p")
@@ -171,6 +172,33 @@ def _format_html_report(
             f"| Avg {schedule_analysis.get('avg_games_per_week', '?')} games/team</p>"
         )
 
+    # IL action banner (streaming mode)
+    il_banner = ""
+    if il_action and mode == "stream":
+        if il_action["strategy"] == "drop_regular":
+            il_banner = (
+                f"<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:6px;"
+                f"padding:12px 16px;margin:10px 0;'>"
+                f"<strong>⚠️ IL/IL+ Action Required</strong><br>"
+                f"<span style='color:#155724;font-weight:bold;'>ACTIVATE</span> "
+                f"{il_action['il_player']} (z: {il_action['il_z']:+.2f}) from {il_action['slot']}<br>"
+                f"<span style='color:#dc3545;font-weight:bold;'>DROP</span> "
+                f"{il_action['drop_player']} (z: {il_action['drop_z']:+.2f})<br>"
+                f"<em style='font-size:12px;color:#856404;'>IL player returning is a roster "
+                f"upgrade — no streaming add needed today.</em>"
+                f"</div>"
+            )
+        else:
+            il_banner = (
+                f"<div style='background:#f8d7da;border:1px solid #f5c6cb;border-radius:6px;"
+                f"padding:12px 16px;margin:10px 0;'>"
+                f"<strong>⚠️ IL/IL+ Action Required</strong><br>"
+                f"<span style='color:#dc3545;font-weight:bold;'>DROP</span> "
+                f"{il_action['il_player']} (z: {il_action['il_z']:+.2f}) "
+                f"from {il_action['slot']} to clear violation, then stream normally."
+                f"</div>"
+            )
+
     html = f"""
     <html>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px;">
@@ -180,6 +208,7 @@ def _format_html_report(
         </div>
 
         {sched_summary}
+        {il_banner}
 
         <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:10px;">
             <thead><tr style="background:#e9ecef;">{header_html}</tr></thead>
@@ -231,6 +260,7 @@ def send_email_report(
     schedule_analysis: dict | None = None,
     top_n: int = 15,
     mode: str = "watch",
+    il_action: dict | None = None,
 ) -> bool:
     """Send the recommendation report via email.
 
@@ -239,6 +269,7 @@ def send_email_report(
         schedule_analysis: Optional schedule data for header context.
         top_n: Number of recommendations to include.
         mode: Report type — ``"watch"`` (full waiver) or ``"stream"`` (today's games).
+        il_action: Optional IL resolution recommendation dict from streaming analysis.
 
     Returns True on success, False on failure (prints error to stderr).
     """
@@ -247,7 +278,11 @@ def send_email_report(
         print("  ✗ Email not configured — set NOTIFY_EMAIL_TO and NOTIFY_SMTP_PASSWORD in .env")
         return False
 
-    html_body = _format_html_report(rec_df, schedule_analysis, top_n, mode=mode)
+    # Auto-extract il_action from DataFrame attrs if not explicitly provided
+    if il_action is None and hasattr(rec_df, "attrs"):
+        il_action = rec_df.attrs.get("il_action")
+
+    html_body = _format_html_report(rec_df, schedule_analysis, top_n, mode=mode, il_action=il_action)
     text_body = _format_plain_report(rec_df, top_n)
 
     now = datetime.now().strftime("%b %d")

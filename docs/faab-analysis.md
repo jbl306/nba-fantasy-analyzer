@@ -13,23 +13,23 @@ This league uses a **$300 regular season budget** that **resets to $100 for the 
 The FAAB analyzer solves this problem by:
 
 1. **Fetching all league transactions** from Yahoo Fantasy
-2. **Classifying each pickup** into a quality tier based on the player's Adj_Score
+2. **Classifying each pickup** into a quality tier based on the player's `Adj_Score`
 3. **Computing bid statistics** per tier, per team, and league-wide
 4. **Suggesting smart bid amounts** based on historical patterns and your chosen strategy
 5. **Adjusting bids for budget health** — scales bids based on remaining budget vs. ideal weekly spend
 6. **Adjusting bids for schedule value** — scales bids based on the player's team game count in the upcoming week
 
-> **Note:** Hot-pickup detection and Yahoo trending data feed into Adj_Score before FAAB tiering occurs. This means breakout performers (🔥) and trending players (📈) naturally receive higher tier classifications and bid suggestions, since their boosted Adj_Score places them in stronger quality tiers.
+> **Note:** Hot-pickup detection and Yahoo trending data feed into `Adj_Score` before FAAB tiering occurs. This means breakout performers (🔥) and trending players (📈) naturally receive higher tier classifications and bid suggestions, since their boosted `Adj_Score` places them in stronger quality tiers.
 
 ---
 
 ## Quality Tiers
 
-Every player (both historical pickups and current waiver candidates) is assigned a quality tier based on their Adj_Score.
+Every player (both historical pickups and current waiver candidates) is assigned a quality tier based on their `Adj_Score`.
 
 ### League-Relative Tiers (default)
 
-When generating bid suggestions, tier boundaries are computed **dynamically from the current waiver pool's Adj_Score distribution** using percentile cutoffs:
+When generating bid suggestions, tier boundaries are computed **dynamically from the current waiver pool's `Adj_Score` distribution** using percentile cutoffs:
 
 | Tier | Percentile | Meaning |
 |------|-----------|----------|
@@ -39,13 +39,13 @@ When generating bid suggestions, tier boundaries are computed **dynamically from
 | **Streamer** | 15th – 40th | Short-term value; good for weekly streaming |
 | **Dart** | < 15th | Speculative; high-upside but inconsistent |
 
-This makes tiers adapt automatically to league depth — a shallow 8-team league and a deep 14-team league will have different Adj_Score cutoffs for "Elite," but the top 10% is always "Elite."
+This makes tiers adapt automatically to league depth — a shallow 8-team league and a deep 14-team league will have different `Adj_Score` cutoffs for "Elite," but the top 10% is always "Elite."
 
 ### Tier Minimum Floors
 
-To prevent weak waiver pools from inflating tier labels (e.g., a 0.48 Adj_Score player being called "Elite"), each tier has an **absolute minimum floor**:
+To prevent weak waiver pools from inflating tier labels (e.g., a 0.48 `Adj_Score` player being called "Elite"), each tier has an **absolute minimum floor**:
 
-| Tier | Minimum Adj_Score |
+| Tier | Minimum `Adj_Score` |
 |------|------------------|
 | **Elite** | ≥ 4.0 |
 | **Strong** | ≥ 2.5 |
@@ -58,7 +58,7 @@ Each tier threshold is the **maximum** of the percentile-derived value and its f
 
 If the waiver pool DataFrame is unavailable or has fewer than 10 players, hard-coded absolute thresholds are used as a fallback:
 
-| Tier | Adj_Score Range |
+| Tier | `Adj_Score` Range |
 |------|----------------|
 | **Elite** | ≥ 6.0 |
 | **Strong** | 4.0 – 5.99 |
@@ -148,7 +148,7 @@ Also shows the **Top 10 Biggest FAAB Bids** — the largest individual bids plac
 
 ## Bid Suggestion Strategies
 
-When suggesting a bid for a waiver candidate, the analyzer maps the player's Adj_Score to a quality tier and then looks up that tier's historical bid distribution. Three strategies are available:
+When suggesting a bid for a waiver candidate, the analyzer maps the player's `Adj_Score` to a quality tier and then looks up that tier's historical bid distribution. Three strategies are available:
 
 | Strategy | Percentile Used | Goal |
 |----------|----------------|------|

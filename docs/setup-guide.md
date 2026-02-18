@@ -126,7 +126,7 @@ python main.py --skip-yahoo
 python main.py --top 25
 ```
 
-### Streaming mode (best pickup with a game today)
+### Streaming mode (best pickup with a game tomorrow)
 
 ```bash
 python main.py --stream
@@ -229,7 +229,7 @@ All configuration lives in `config.py` and can be adjusted:
 |---------|---------|-------------|
 | `HOT_PICKUP_ENABLED` | `True` | Enable hot-pickup detection (recent game z-delta analysis + Yahoo trending) |
 | `HOT_PICKUP_RECENT_GAMES` | `3` | Number of recent games to fetch for each candidate |
-| `HOT_PICKUP_RECENCY_WEIGHT` | `0.25` | Additive boost per z_delta point for improving players |
+| `HOT_PICKUP_RECENCY_WEIGHT` | `0.25` | Additive boost per `z_delta` point for improving players |
 | `HOT_PICKUP_TRENDING_WEIGHT` | `0.15` | Additive boost for trending players (scaled by ownership delta) |
 | `HOT_PICKUP_MIN_DELTA` | `5` | Minimum %-ownership change to flag a player as 📈 Trending |
 | `SCHEDULE_WEEK_DECAY` | `0.50` | Exponential decay factor for future week weighting |
@@ -246,7 +246,7 @@ All configuration lives in `config.py` and can be adjusted:
 | `--faab-history` | Fetch FAAB bid history for smart suggestions |
 | `--strategy S` | FAAB strategy: `value`, `competitive`, `aggressive` |
 | `--days N` | Schedule analysis window in days |
-| `--stream` | Streaming mode — best pickup with a game today |
+| `--stream` | Streaming mode — best pickup with a game tomorrow (overnight FAAB) |
 | `--watch` | Run analysis once and email results (for scheduled/cron use) |
 | `--list-leagues` | Show all your NBA fantasy leagues and exit |
 | `--list-teams` | Show all teams in your league and exit |

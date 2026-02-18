@@ -80,7 +80,7 @@ Key metrics computed:
 
 ## Schedule Multiplier
 
-The schedule multiplier adjusts a player's Adj_Score based on their team's game count relative to the league average.
+The schedule multiplier adjusts a player's `Adj_Score` based on their team's game count relative to the league average.
 
 ### Multi-Week Decay Weighting
 

@@ -80,6 +80,12 @@ SCHEDULE_WEEK_DECAY = 0.5      # Weight decay per future week (wk1=1.0, wk2=0.5,
 # doesn't have an eligible status, Yahoo blocks ALL transactions.
 IL_ELIGIBLE_STATUSES = {"INJ", "O", "SUSP"}
 IL_PLUS_ELIGIBLE_STATUSES = {"INJ", "O", "GTD", "DTD", "SUSP"}
+# When an IL player recovers and the roster is full, two drops are needed:
+# one to resolve the IL violation and one for the waiver claim.
+# In streaming mode, if the worst regular roster player's z-score is within
+# this threshold of the IL player's z-score, just drop the regular player
+# and move the IL player to bench (roster upgrade, saves a transaction).
+IL_SMART_DROP_Z_THRESHOLD = 0.5
 
 # nba_api settings
 # Number of recent games to evaluate player performance

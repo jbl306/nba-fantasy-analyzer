@@ -85,6 +85,112 @@ def check_il_compliance(query) -> list[dict]:
     return violations
 
 
+def evaluate_il_resolution(
+    violations: list[dict],
+    roster_df: "pd.DataFrame",
+    nba_stats: "pd.DataFrame",
+    droppable: list[str],
+    mode: str = "claim",
+) -> list[dict]:
+    """Decide the best resolution strategy for each IL/IL+ violation.
+
+    Two strategies:
+      * **drop_il** – drop the recovered IL player directly.  This clears
+        the violation AND frees a roster spot so that all regular
+        droppable players remain available for waiver claims.
+      * **drop_regular** – drop the worst regular roster player and move
+        the IL player to bench.  The IL player stays on the roster as a
+        roster upgrade, replacing the weakest player.
+
+    In *claim* mode the strategy is always ``drop_il`` (simple, preserves
+    droppable players for bids).
+
+    In *stream* mode the strategy uses a z-score proximity check:
+      * If the worst regular player's z-score is within
+        ``config.IL_SMART_DROP_Z_THRESHOLD`` of the IL player's z-score
+        (or worse), use ``drop_regular`` — the IL player replaces the
+        weakest player, acting as the day's streaming roster upgrade.
+      * Otherwise use ``drop_il`` — the IL player isn't worth keeping.
+
+    Args:
+        violations: List from ``check_il_compliance()``.
+        roster_df: DataFrame from ``analyze_roster`` (``name``, ``Z_TOTAL``).
+        nba_stats: Full league stats DataFrame with z-scores.
+        droppable: Droppable player names (lowest z-score first).
+        mode: ``"claim"`` or ``"stream"``.
+
+    Returns:
+        List of dicts, one per violation:
+            ``violation``, ``strategy`` (``"drop_il"`` | ``"drop_regular"``),
+            ``il_z``, ``regular_player``, ``regular_z``.
+    """
+    from src.waiver_advisor import match_yahoo_to_nba
+
+    threshold = getattr(config, "IL_SMART_DROP_Z_THRESHOLD", 0.5)
+    strategies: list[dict] = []
+
+    for v in violations:
+        il_name = v["player"]
+        il_key = v["player_key"]
+
+        # Look up IL player z-score
+        il_z: float | None = None
+        if not roster_df.empty and "Z_TOTAL" in roster_df.columns:
+            match = roster_df.loc[
+                roster_df["name"].apply(normalize_name) == normalize_name(il_name)
+            ]
+            if not match.empty:
+                il_z = float(match.iloc[0]["Z_TOTAL"])
+        # Fallback to nba_stats
+        if il_z is None and nba_stats is not None and not nba_stats.empty:
+            idx = match_yahoo_to_nba(il_name, nba_stats)
+            if idx is not None:
+                il_z = float(nba_stats.loc[idx, "Z_TOTAL"])
+        if il_z is None:
+            il_z = 0.0
+
+        # Worst regular (non-IL/IL+) droppable player
+        regular_name: str | None = None
+        regular_z: float | None = None
+        if droppable:
+            regular_name = droppable[0]  # already sorted lowest-first
+            if not roster_df.empty and "Z_TOTAL" in roster_df.columns:
+                rmatch = roster_df.loc[
+                    roster_df["name"].apply(normalize_name) == normalize_name(regular_name)
+                ]
+                if not rmatch.empty:
+                    regular_z = float(rmatch.iloc[0]["Z_TOTAL"])
+            if regular_z is None and nba_stats is not None and not nba_stats.empty:
+                idx = match_yahoo_to_nba(regular_name, nba_stats)
+                if idx is not None:
+                    regular_z = float(nba_stats.loc[idx, "Z_TOTAL"])
+            if regular_z is None:
+                regular_z = 0.0
+
+        # Decide strategy
+        if mode == "stream" and regular_name is not None and regular_z is not None:
+            # Stream mode: keep the IL player if they're close-to or better
+            # than the worst regular player (drop_regular swaps them).
+            diff = il_z - regular_z  # positive = IL player is better
+            if diff >= -threshold:
+                strategy = "drop_regular"
+            else:
+                strategy = "drop_il"
+        else:
+            # Claim mode: always drop the IL player to preserve droppable list.
+            strategy = "drop_il"
+
+        strategies.append({
+            "violation": v,
+            "strategy": strategy,
+            "il_z": il_z,
+            "regular_player": regular_name,
+            "regular_z": regular_z,
+        })
+
+    return strategies
+
+
 # ---------------------------------------------------------------------------
 # Player key resolution helpers
 # ---------------------------------------------------------------------------
@@ -487,84 +593,121 @@ def resolve_il_violations(
     violations: list[dict],
     available_droppable: list[str],
     dry_run: bool = False,
-) -> tuple[bool, list[str]]:
-    """Auto-resolve IL/IL+ violations by dropping a player and moving the
-    non-compliant IL player to the bench.
+    strategies: list[dict] | None = None,
+) -> tuple[bool, list[str], list[str]]:
+    """Auto-resolve IL/IL+ violations using the chosen strategy.
 
-    For each violation the flow is:
-      1. Select the first available droppable player
-      2. Drop that player (frees a roster spot)
-      3. Move the non-compliant IL/IL+ player to BN (bench)
+    Two strategies per violation (set via ``evaluate_il_resolution``):
+
+    **drop_il** (default / claim flow):
+      1. Drop the non-compliant IL player directly.
+      This clears the violation AND frees a roster spot, leaving all
+      regular droppable players available for waiver bids.
+
+    **drop_regular** (smart stream flow):
+      1. Drop the worst regular roster player (frees a roster spot).
+      2. Move the IL player from IL/IL+ → BN (fills the freed spot).
+      The IL player stays on the roster as a roster upgrade.
 
     Args:
         query: Authenticated yfpy query instance.
-        violations: List from check_il_compliance() (must include player_key).
+        violations: List from ``check_il_compliance()`` (must include player_key).
         available_droppable: Droppable player names still available.
         dry_run: If True, preview without submitting.
+        strategies: Optional list from ``evaluate_il_resolution()``.  When
+            ``None``, defaults to ``"drop_il"`` for every violation.
 
     Returns:
-        Tuple of (all_resolved: bool, names_consumed: list[str]).
-        names_consumed lists the droppable players that were used up.
+        Tuple of (all_resolved, regular_consumed, il_dropped).
+        - regular_consumed: regular droppable names used (``drop_regular`` path).
+        - il_dropped: IL player names that were dropped (``drop_il`` path).
     """
-    consumed: list[str] = []
+    regular_consumed: list[str] = []
+    il_dropped: list[str] = []
     remaining = list(available_droppable)  # work on a copy
 
-    for v in violations:
+    for i, v in enumerate(violations):
         il_player = v["player"]
         il_key = v["player_key"]
         slot = v["slot"]
-
-        if not remaining:
-            print(f"\n  ✗ No droppable players left to resolve {il_player} in {slot}")
-            if getattr(config, "AUTO_DETECT_DROPPABLE", False):
-                print(f"    Increase AUTO_DROPPABLE_COUNT in config.py")
-            else:
-                print(f"    Add more players to DROPPABLE_PLAYERS in config.py")
-            return False, consumed
-
-        # Pick the first available droppable player
-        drop_name = remaining.pop(0)
-
-        print(f"\n  Resolving: {il_player} in {slot} (status: {v['status']})")
-        print(f"    Step 1 → Drop {drop_name} to free a roster spot")
-
-        # Resolve the droppable player's key
-        drop_key = find_player_key_on_roster(query, drop_name)
-        if not drop_key:
-            print(f"    ✗ Could not find {drop_name} on roster!")
-            return False, consumed
+        strategy = "drop_il"
+        if strategies and i < len(strategies):
+            strategy = strategies[i].get("strategy", "drop_il")
 
         team_key = get_team_key(query)
-        drop_xml = build_drop_only_xml(drop_key, team_key)
 
-        if dry_run:
-            print(f"    [DRY RUN] Would drop {drop_name} ({drop_key})")
+        if strategy == "drop_il":
+            # ── Strategy A: drop the IL player directly ──────────
+            print(f"\n  Resolving: {il_player} in {slot} (status: {v['status']})")
+            print(f"    Strategy: DROP the IL player directly")
+            print(f"    → Drop {il_player} from {slot}")
+
+            if dry_run:
+                print(f"    [DRY RUN] Would drop {il_player} ({il_key})")
+            else:
+                drop_xml = build_drop_only_xml(il_key, team_key)
+                result = submit_transaction(query, drop_xml)
+                if not result["success"]:
+                    print(f"    ✗ Drop failed: {result['message']}")
+                    if "response_text" in result:
+                        print(f"      {result['response_text'][:200]}")
+                    return False, regular_consumed, il_dropped
+                print(f"    ✓ Dropped {il_player} — IL violation cleared")
+
+            il_dropped.append(il_player)
+
         else:
-            result = submit_transaction(query, drop_xml)
-            if not result["success"]:
-                print(f"    ✗ Drop failed: {result['message']}")
-                if "response_text" in result:
-                    print(f"      {result['response_text'][:200]}")
-                return False, consumed
-            print(f"    ✓ Dropped {drop_name}")
+            # ── Strategy B: drop worst regular, move IL → BN ─────
+            if not remaining:
+                print(f"\n  ✗ No droppable players left to resolve {il_player} in {slot}")
+                if getattr(config, "AUTO_DETECT_DROPPABLE", False):
+                    print(f"    Increase AUTO_DROPPABLE_COUNT in config.py")
+                else:
+                    print(f"    Add more players to DROPPABLE_PLAYERS in config.py")
+                return False, regular_consumed, il_dropped
 
-        consumed.append(drop_name)
+            drop_name = remaining.pop(0)
+            il_z = strategies[i]["il_z"] if strategies else 0
+            reg_z = strategies[i]["regular_z"] if strategies else 0
 
-        # Move the IL player to bench
-        print(f"    Step 2 → Move {il_player} from {slot} to BN")
+            print(f"\n  Resolving: {il_player} in {slot} (status: {v['status']})")
+            print(f"    Strategy: KEEP IL player (z: {il_z:+.2f}), "
+                  f"DROP {drop_name} (z: {reg_z:+.2f})")
+            print(f"    Step 1 → Drop {drop_name} to free a roster spot")
 
-        if dry_run:
-            print(f"    [DRY RUN] Would move {il_player} ({il_key}) → BN")
-        else:
-            move_result = submit_roster_move(query, il_key, "BN")
-            if not move_result["success"]:
-                print(f"    ✗ Roster move failed: {move_result['message']}")
-                if "response_text" in move_result:
-                    print(f"      {move_result['response_text'][:200]}")
-                return False, consumed
-            print(f"    ✓ Moved {il_player} to bench")
+            drop_key = find_player_key_on_roster(query, drop_name)
+            if not drop_key:
+                print(f"    ✗ Could not find {drop_name} on roster!")
+                return False, regular_consumed, il_dropped
 
-    return True, consumed
+            if dry_run:
+                print(f"    [DRY RUN] Would drop {drop_name} ({drop_key})")
+            else:
+                drop_xml = build_drop_only_xml(drop_key, team_key)
+                result = submit_transaction(query, drop_xml)
+                if not result["success"]:
+                    print(f"    ✗ Drop failed: {result['message']}")
+                    if "response_text" in result:
+                        print(f"      {result['response_text'][:200]}")
+                    return False, regular_consumed, il_dropped
+                print(f"    ✓ Dropped {drop_name}")
+
+            regular_consumed.append(drop_name)
+
+            print(f"    Step 2 → Move {il_player} from {slot} to BN")
+
+            if dry_run:
+                print(f"    [DRY RUN] Would move {il_player} ({il_key}) → BN")
+            else:
+                move_result = submit_roster_move(query, il_key, "BN")
+                if not move_result["success"]:
+                    print(f"    ✗ Roster move failed: {move_result['message']}")
+                    if "response_text" in move_result:
+                        print(f"      {move_result['response_text'][:200]}")
+                    return False, regular_consumed, il_dropped
+                print(f"    ✓ Moved {il_player} to bench — roster upgraded")
+
+    return True, regular_consumed, il_dropped
 
 
 # ---------------------------------------------------------------------------
@@ -803,10 +946,27 @@ def run_transaction_flow(
             print(f"  \u2022 {v['player']} is in {v['slot']} slot with status: {v['status']}")
             print(f"    Required: {v['eligible_statuses']}")
 
-        # Check if we have enough droppable players for IL resolution + bids
-        needed = len(il_violations)
-        if needed > len(droppable):
-            print(f"\n  ✗ Need {needed} droppable players for IL resolution but only "
+        # Evaluate the best resolution strategy (claim mode → always drop IL player)
+        il_strategies = evaluate_il_resolution(
+            il_violations, roster_df,
+            nba_stats if nba_stats is not None else pd.DataFrame(),
+            droppable, mode="claim",
+        )
+        for st in il_strategies:
+            v = st["violation"]
+            if st["strategy"] == "drop_il":
+                print(f"\n  → Will DROP {v['player']} (z: {st['il_z']:+.2f}) "
+                      f"from {v['slot']} to clear violation")
+            else:
+                print(f"\n  → Will DROP {st['regular_player']} (z: {st['regular_z']:+.2f}), "
+                      f"KEEP {v['player']} (z: {st['il_z']:+.2f}) on bench")
+
+        # For claim mode with drop_il strategy, no droppable players are consumed
+        # for IL resolution — the IL players themselves are dropped.
+        # For drop_regular strategy, one droppable is consumed per violation.
+        regular_needed = sum(1 for s in il_strategies if s["strategy"] == "drop_regular")
+        if regular_needed > len(droppable):
+            print(f"\n  ✗ Need {regular_needed} droppable players for IL resolution but only "
                   f"{len(droppable)} available.")
             if _auto_mode:
                 print(f"    Increase AUTO_DROPPABLE_COUNT (currently {config.AUTO_DROPPABLE_COUNT}) in config.py.")
@@ -814,23 +974,34 @@ def run_transaction_flow(
                 print(f"    Add more players to DROPPABLE_PLAYERS in config.py.")
             return
 
-        remaining_after = len(droppable) - needed
-        print(f"\n  Auto-resolving {needed} IL violation(s)...")
-        print(f"  Will use {needed} droppable player(s), leaving {remaining_after} for bids.")
+        il_count = sum(1 for s in il_strategies if s["strategy"] == "drop_il")
+        print(f"\n  Auto-resolving {len(il_violations)} IL violation(s)...")
+        if il_count:
+            print(f"  Dropping {il_count} IL player(s) directly — "
+                  f"all {len(droppable)} droppable players preserved for bids.")
+        if regular_needed:
+            remaining_after = len(droppable) - regular_needed
+            print(f"  Using {regular_needed} droppable player(s), "
+                  f"leaving {remaining_after} for bids.")
 
-        success, consumed = resolve_il_violations(
+        success, regular_consumed, il_dropped_names = resolve_il_violations(
             query, il_violations, droppable, dry_run=dry_run,
+            strategies=il_strategies,
         )
         if not success:
             print("\n  ✗ IL resolution failed. Cannot proceed with transactions.")
             return
 
-        # Remove consumed players from the droppable list
-        for name in consumed:
+        # Remove consumed regular players from the droppable list
+        for name in regular_consumed:
             if name in droppable:
                 droppable.remove(name)
 
         print(f"\n  ✓ IL/IL+ compliance resolved")
+        if il_dropped_names:
+            print(f"    Dropped IL players: {', '.join(il_dropped_names)}")
+        if regular_consumed:
+            print(f"    Dropped regular players: {', '.join(regular_consumed)}")
 
         if not droppable:
             print("\n  \u26a0  All droppable players were used for IL resolution.")

@@ -212,7 +212,8 @@ def get_all_team_rosters(query: YahooFantasySportsQuery) -> tuple[dict, set]:
         team_name = "Unknown"
         team_id = None
         if hasattr(team, "name"):
-            team_name = str(team.name)
+            raw = team.name
+            team_name = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
         if hasattr(team, "team_id"):
             team_id = int(team.team_id)
 

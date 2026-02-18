@@ -12,7 +12,9 @@ Combines **nba_api** (real NBA stats) with **yfpy** (Yahoo Fantasy Sports API) t
 - Factor in upcoming schedule density (games per week)
 - Recommend the best available waiver wire pickups tailored to your team's needs
 - Submit waiver claims and FAAB bids directly to Yahoo
-- Auto-resolve IL/IL+ roster moves
+- Auto-resolve IL/IL+ roster moves with smart drop strategies
+- Scheduled watch mode with email reports via GitHub Actions
+- Streaming mode targeting tomorrow's games (designed for overnight FAAB leagues)
 
 ## Setup
 
@@ -72,7 +74,10 @@ python main.py --dry-run                   # Preview a claim without submitting
 python main.py --faab-history              # Analyze league FAAB bid history
 python main.py --strategy aggressive       # FAAB bidding strategy (value|competitive|aggressive)
 python main.py --compact                   # Compact table: Player, Team, Z, Score, Injury, Schedule
-python main.py --stream                    # Streaming mode: best pickup with a game today
+python main.py --stream                    # Streaming mode: best pickup with a game tomorrow
+python main.py --stream --dry-run          # Preview streaming picks without submitting
+python main.py --watch                     # Run full analysis and email the report
+python main.py --stream --watch            # Run streaming analysis and email the report
 python main.py --list-leagues              # Show all your Yahoo Fantasy NBA leagues
 python main.py --list-teams                # Show all teams in your league
 python main.py --skip-yahoo --top 30
@@ -95,7 +100,9 @@ python main.py --skip-yahoo --top 30
 13. **Auto-Detect League Settings**: On startup, reads Yahoo API league metadata (stat categories, roster positions, FAAB/waiver type, transaction limits) and auto-overrides config defaults — no manual tuning needed.
 14. **League & Team Discovery**: `--list-leagues` shows all Yahoo Fantasy NBA leagues you belong to; `--list-teams` lists every team in the current league with IDs and manager names.
 15. **Roster Impact Preview**: Before confirming a waiver claim, shows the per-category z-score delta (ADD vs. DROP) so you can see exactly which categories improve or regress.
-16. **Streaming Mode**: `--stream` finds the best available waiver pickup whose team plays *today*, identifies your weakest roster spot, and shows the roster impact of the swap.
+16. **Streaming Mode**: `--stream` finds the best available waiver pickup whose team plays *tomorrow* (for overnight FAAB leagues), identifies your weakest roster spot, and shows the roster impact of the swap.
+17. **IL/IL+ Smart Resolution**: In claim mode, drops the IL player directly to preserve all droppable players for bids. In streaming mode, compares z-scores — if the recovered IL player is close to (or better than) the worst roster player, keeps the IL player as a roster upgrade instead.
+18. **Watch Mode & Email Reports**: `--watch` runs the analysis and emails an HTML report (with color-coded injury badges and score highlights). `--stream --watch` does the same for streaming picks. Designed for GitHub Actions nightly automation.
 
 ## Project Structure
 
@@ -115,8 +122,13 @@ nba-fantasy-advisor/
 │   ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
 │   ├── faab_analyzer.py    # FAAB bid history & suggested bids
 │   ├── league_settings.py  # Yahoo league settings, FAAB balance, budget tracking
-│   ├── transactions.py     # Waiver claims, FAAB bids & IL moves
+│   ├── transactions.py     # Waiver claims, FAAB bids & IL smart resolution
+│   ├── notifier.py         # HTML email reports for watch/scheduled mode
 │   └── colors.py           # ANSI color utilities for terminal output
+├── .github/
+│   └── workflows/
+│       ├── nightly-watch.yml   # Nightly waiver report (11 PM ET)
+│       └── daily-stream.yml    # Daily streaming picks (12:30 AM ET)
 └── docs/
     ├── methodology.md      # Scoring model & algorithm details
     ├── setup-guide.md      # Installation & configuration
@@ -124,6 +136,7 @@ nba-fantasy-advisor/
     ├── faab-analysis.md    # FAAB bid analysis system
     ├── transactions.md     # Transaction submission flow
     ├── schedule-analysis.md # Schedule scoring & FAAB adjustment
+    ├── github-workflows.md # GitHub Actions setup & troubleshooting
     └── example-run.md      # Full annotated example output
 ```
 
@@ -176,4 +189,6 @@ nba-fantasy-advisor/
 - **Yahoo trending integration**: Queries Yahoo ownership-change data in batches. Players gaining ≥ 5% ownership are flagged as 📈 Trending. Trending boost = `TRENDING_WEIGHT × min(delta/10, 3.0)` (additive to Adj_Score).
 - **Expanded candidate pool**: When hot-pickup is enabled, the candidate pool is expanded to `TOP_N × 3` to ensure breakout performers ranked lower by season z-score are still evaluated.
 - **Auto-detect league settings**: On startup, `apply_yahoo_settings()` reads the Yahoo API response and patches `WEEKLY_TRANSACTION_LIMIT`, `FAAB_ENABLED`, validates 9-cat stat categories, and reports roster slot counts — so your config matches your league automatically.
-- **Streaming mode**: `--stream` fetches today's NBA schedule, filters the waiver pool to only players with a game today, and ranks them using the same need-weighted scoring. Shows your weakest roster spot and the roster impact of the top suggested swap.
+- **Streaming mode**: `--stream` fetches tomorrow's NBA schedule and filters the waiver pool to only players with a game tomorrow (designed for overnight FAAB auction leagues). Ranks them using the same need-weighted scoring. Shows your weakest roster spot and the roster impact of the top suggested swap. Also checks IL/IL+ compliance and may recommend activating a recovered IL player as the day's roster upgrade.
+- **IL/IL+ smart resolution**: Two strategies based on context. **Claim flow** (`--claim`/`--dry-run`): drops the IL player directly — clears the violation and frees a roster spot without consuming any droppable players. **Streaming flow** (`--stream`): compares the IL player's z-score with the worst regular roster player — if close enough (`IL_SMART_DROP_Z_THRESHOLD`, default 0.5), drops the regular player and activates the IL player as a roster upgrade.
+- **Watch mode & email**: `--watch` sends an HTML email report after analysis. `--stream --watch` sends a streaming picks email. Uses Gmail SMTP with App Passwords. Designed for GitHub Actions cron automation (see `.github/workflows/`).

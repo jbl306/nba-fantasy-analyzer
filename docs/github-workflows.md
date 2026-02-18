@@ -98,7 +98,7 @@ Runs the full waiver wire analysis and emails your top recommendations every nig
 Subject: **🏀 Waiver Wire Report — Feb 18**
 
 The email includes:
-- Ranked table: Player, Team, Z_Value, Adj_Score, Games this week, Injury status
+- Ranked table: Player, Team, `Z_Value`, `Adj_Score`, Games this week, Injury status
 - 🔥 Hot pickup and 📈 Trending flags
 - Schedule context (current week dates and avg games/team)
 - Color-coded scores (green = strong, grey = marginal)
@@ -118,7 +118,7 @@ Useful for mid-week checks or after a major injury news.
 
 **File:** `.github/workflows/daily-stream.yml`
 
-Finds the best available player with a game **today** and emails streaming recommendations. Designed for daily add/drop strategies.
+Finds the best available player with a game **tomorrow** and emails streaming recommendations. Designed for overnight FAAB auction leagues where same-day pickups are not possible.
 
 ### Schedule
 
@@ -128,17 +128,18 @@ Finds the best available player with a game **today** and emails streaming recom
 | ET (EDT) | 12:30 AM (04:30 UTC) |
 | UTC | 05:30 |
 
-Running after midnight means all evening games have already tipped off — the schedule data reflects the full day's actual game slate.
+Running after midnight allows overnight FAAB processing — the streaming picks target tomorrow's game slate so your claims are ready for the next day.
 
 ### What it does
 
 1. Checks out the repo and installs dependencies
 2. Builds a `.env` from GitHub Secrets
 3. Runs `python main.py --stream --watch`:
-   - Fetches today's NBA schedule
-   - Filters the waiver pool to only players on teams playing today
+   - Fetches tomorrow's NBA schedule
+   - Filters the waiver pool to only players on teams playing tomorrow
+   - Checks IL/IL+ compliance and evaluates smart drop strategies
    - Ranks candidates against your roster's weakest spot
-   - Sends an HTML email with today's best streaming pickups
+   - Sends an HTML email with tomorrow's best streaming pickups
 4. Uploads CSV output as a run artifact (kept 7 days)
 
 ### Email format
@@ -146,7 +147,8 @@ Running after midnight means all evening games have already tipped off — the s
 Subject: **🏀 Streaming Picks — Feb 18**
 
 The email includes:
-- Ranked table of available players with games today
+- Ranked table of available players with games tomorrow
+- IL/IL+ action banner (if applicable) — activate a recovered IL player or drop to clear violation
 - Roster impact preview for the top pick
 - Injury and z-score context
 

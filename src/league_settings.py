@@ -45,7 +45,7 @@ def fetch_league_settings(query) -> dict[str, Any]:
         ):
             val = getattr(settings, attr, None)
             if val is not None:
-                data[attr] = val
+                data[attr] = val.decode("utf-8") if isinstance(val, bytes) else val
     except Exception as e:
         print(f"  Warning: could not fetch league settings: {e}")
 
@@ -59,7 +59,7 @@ def fetch_league_settings(query) -> dict[str, Any]:
         ):
             val = getattr(metadata, attr, None)
             if val is not None and attr not in data:
-                data[attr] = val
+                data[attr] = val.decode("utf-8") if isinstance(val, bytes) else val
     except Exception as e:
         print(f"  Warning: could not fetch league metadata: {e}")
 
@@ -604,10 +604,7 @@ def format_settings_report(
         lines.append(f"  End week:         {end_wk}")
         lines.append(f"  Playoff starts:   Week {playoff_wk}")
 
-        # Roster positions
-        positions = settings.get("roster_positions", None)
-        if positions:
-            lines.append(f"\n  Roster positions: {positions}")
+
 
     if budget_info:
         from src.colors import colorize_budget_status

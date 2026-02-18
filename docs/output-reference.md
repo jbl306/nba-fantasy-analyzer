@@ -90,12 +90,12 @@ The main output is a ranked table of available waiver wire players.
 | **BLK** | nba_api | Blocks per game |
 | **TO** | nba_api | Turnovers per game |
 | **Z_Value** | Computed | Sum of z-scores across all 9 categories. Raw talent ranking without adjustments. |
-| **Z_Delta** | Computed | Difference between recent-game z-score and season z-score. Positive = improving, negative = declining. Color-coded: green (≥ 1.0), red (≤ -1.0). |
-| **Hot** | Computed | 🔥 when Z_Delta ≥ 1.0 — player is performing significantly above their season average in recent games. |
+| `Z_Delta` | Computed | Difference between recent-game z-score and season z-score. Positive = improving, negative = declining. Color-coded: green (≥ 1.0), red (≤ -1.0). |
+| **Hot** | Computed | 🔥 when `Z_Delta` ≥ 1.0 — player is performing significantly above their season average in recent games. |
 | **%Own** | Yahoo API | Percentage of Yahoo leagues where the player is rostered (0–100). |
 | **Δ%Own** | Yahoo API | Change in ownership percentage over the last week. Positive = rising demand. |
 | **Trending** | Computed | 📈 when Δ%Own ≥ `HOT_PICKUP_MIN_DELTA` (default: 5) — player is being widely added across leagues. |
-| **Adj_Score** | Computed | Final adjusted score factoring in team needs, availability, recent activity, schedule, recency boost, and trending boost. **This is the primary sort column.** |
+| `Adj_Score` | Computed | Final adjusted score factoring in team needs, availability, recent activity, schedule, recency boost, and trending boost. **This is the primary sort column.** |
 | **Games_Wk** | Schedule | Remaining games this fantasy week (Mon–Sun). Games already played are excluded. More remaining games = more stat opportunity. |
 
 ### Health Flag
@@ -153,13 +153,13 @@ Based on when the player last appeared in an NBA game:
 
 ### Interpreting the Output
 
-- **High Z_Value but low Adj_Score**: The player is talented but penalized for poor availability or current inactivity. They may be injured. Stash candidate for IR if your league supports it.
-- **Adj_Score close to Z_Value**: The player is healthy, recently active, and may also address your team needs. This is an ideal pickup.
-- **Adj_Score higher than Z_Value**: The player's stats align with your team's weakest categories, giving them a need-weighted bonus on top of raw talent.
-- **High Games_Wk**: Players with more remaining games this week provide more stat opportunities. Combined with a high Adj_Score, these are premium pickups for the current week.
-- **🔥 Hot indicator**: The player's last few games are significantly better than their season average (z_delta ≥ 1.0). This is a breakout signal — they may be emerging into a larger role or finding their rhythm.
+- **High `Z_Value` but low `Adj_Score`**: The player is talented but penalized for poor availability or current inactivity. They may be injured. Stash candidate for IR if your league supports it.
+- **`Adj_Score` close to `Z_Value`**: The player is healthy, recently active, and may also address your team needs. This is an ideal pickup.
+- **`Adj_Score` higher than `Z_Value`**: The player's stats align with your team's weakest categories, giving them a need-weighted bonus on top of raw talent.
+- **High `Games_Wk`**: Players with more remaining games this week provide more stat opportunities. Combined with a high `Adj_Score`, these are premium pickups for the current week.
+- **🔥 Hot indicator**: The player's last few games are significantly better than their season average (`z_delta` ≥ 1.0). This is a breakout signal — they may be emerging into a larger role or finding their rhythm.
 - **📈 Trending indicator**: The player's ownership is rising rapidly across Yahoo leagues. Other managers are picking them up, so acting quickly is important before they're unavailable.
-- **Positive Z_Delta but no 🔥**: The player is improving recently but not dramatically enough to qualify as "hot" (z_delta between 0 and 1.0). Still a mild positive signal.
+- **Positive `Z_Delta` but no 🔥**: The player is improving recently but not dramatically enough to qualify as "hot" (`z_delta` between 0 and 1.0). Still a mild positive signal.
 
 ---
 
@@ -258,11 +258,11 @@ python main.py --compact
 | **Games_Wk** | Remaining games this week |
 | **Injury** | Injury status (color-coded) |
 | **Z_Value** | Raw 9-cat z-score |
-| **Adj_Score** | Final adjusted score |
-| **Hot** | 🔥 if breakout performer (z_delta ≥ 1.0) |
+| `Adj_Score` | Final adjusted score |
+| **Hot** | 🔥 if breakout performer (`z_delta` ≥ 1.0) |
 | **Trending** | 📈 if ownership rising rapidly |
 
-All other columns (GP, MIN, Avail%, Health, Recent, G/14d, individual stat lines, Z_Delta, %Own, Δ%Own) are hidden in compact mode. The legend is also shortened.
+All other columns (GP, MIN, Avail%, Health, Recent, G/14d, individual stat lines, `Z_Delta`, %Own, Δ%Own) are hidden in compact mode. The legend is also shortened.
 
 ---
 
@@ -275,7 +275,7 @@ When running with `--skip-yahoo`, the tool cannot determine your team's roster o
 - All players meeting the minimum stat thresholds are considered "available" (no roster filtering)
 - **Trending data is unavailable** — Yahoo ownership deltas require a Yahoo connection, so the Trending (📈), %Own, and Δ%Own columns will be empty
 - Hot-pickup detection (🔥) still works since it uses NBA game log data only
-- Output shows the same columns, but Adj_Score = Z_Value × availability multipliers + recency boost only
+- Output shows the same columns, but `Adj_Score` = `Z_Value` × availability multipliers + recency boost only
 - Useful for a quick overview of the best unowned NBA performers regardless of league context
 
 ### Usage
@@ -296,10 +296,10 @@ python main.py --skip-yahoo --top 25
 | `--days N` | (season) | Currently reserved for future per-range stat window functionality |
 | `--claim` | off | After analysis, enter interactive multi-bid transaction flow |
 | `--dry-run` | off | Preview transactions without submitting (implies `--claim`) |
-| `--compact` | off | Show condensed table: Player, Team, Games_Wk, Injury, Z_Value, Adj_Score only |
+| `--compact` | off | Show condensed table: Player, Team, `Games_Wk`, Injury, `Z_Value`, `Adj_Score` only |
 | `--faab-history` | off | Analyze league FAAB bid history and show suggested bids for all strategies |
 | `--strategy` | `competitive` | Override FAAB bidding strategy: `value`, `competitive`, or `aggressive` |
-| `--stream` | off | Streaming mode: find the best available player with a game today for your weakest roster spot |
+| `--stream` | off | Streaming mode: find the best available player with a game tomorrow for your weakest roster spot |
 | `--list-leagues` | off | Show all Yahoo Fantasy NBA leagues you belong to and exit |
 | `--list-teams` | off | Show all teams in your league with IDs and managers, then exit |
 
@@ -423,7 +423,7 @@ When submitting a waiver claim (`--claim` or `--dry-run`), a roster impact previ
     FG% +0.3, FT% -0.1, 3PM +0.2, PTS +1.4, REB -0.5, AST +0.3, STL +0.1, BLK +0.2, TO -0.1  →  net +1.8 z-score
 ```
 
-- Each category shows the z-score change (add_z − drop_z).
+- Each category shows the z-score change (`add_z` − `drop_z`).
 - Green values (≥ +0.3) indicate meaningful improvement; red (≤ −0.3) indicate regression.
 - The net z-score summarises the total impact of the swap across all non-punt categories.
 
@@ -431,7 +431,7 @@ When submitting a waiver claim (`--claim` or `--dry-run`), a roster impact previ
 
 ## 10. Streaming Mode (`--stream`)
 
-Streaming mode finds the best available player with a game **today** and recommends them as a daily add/drop:
+Streaming mode finds the best available player with a game **tomorrow** and recommends them as a daily add/drop (designed for overnight FAAB auction leagues):
 
 ```bash
 python main.py --stream
@@ -439,11 +439,12 @@ python main.py --stream
 
 ### How it works
 
-1. Fetches today's NBA schedule to identify which teams play.
-2. Filters the waiver pool to only players on teams with a game today.
+1. Fetches tomorrow's NBA schedule to identify which teams play.
+2. Filters the waiver pool to only players on teams with a game tomorrow.
 3. Analyzes your roster to identify your weakest spot (lowest z-score player).
-4. Scores streaming candidates using the same need-weighted algorithm.
-5. Shows the top picks with a roster impact preview for the #1 recommendation.
+4. Checks IL/IL+ compliance — evaluates whether a recovered IL player should be activated as a roster upgrade.
+5. Scores streaming candidates using the same need-weighted algorithm.
+6. Shows the top picks with a roster impact preview for the #1 recommendation.
 
 ### Example output
 
@@ -452,14 +453,14 @@ python main.py --stream
   STREAMING ADVISOR — Wednesday January 15, 2025
 ======================================================================
 
-  8 games today — 16 teams playing
-  42 available players with a game today
+  8 games tomorrow — 16 teams playing
+  42 available players with a game tomorrow
 
   Weakest roster spot: Kevin Love (z-score: -1.24)
   Target categories: STL, REB, BLK
 
 ==========================================================================================
-BEST STREAMING PICKUPS FOR TODAY (Jan 15)
+BEST STREAMING PICKUPS FOR TOMORROW (Jan 16)
 ==========================================================================================
 
  Rank  Player            Team  Injury  FG%    FT%    3PM   PTS   REB   AST   STL  BLK  TO   Z_Value  Adj_Score

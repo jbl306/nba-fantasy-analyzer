@@ -759,8 +759,8 @@ def format_recommendations(
         lines.append("🔥 Hot     = Performing 1+ z-score above season average in last 3 games")
         lines.append("📈 Trending = Ownership spiking across Yahoo leagues (early pickup signal)")
         lines.append("Avail%    = Games Played / Team Games (season durability)")
-        lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)")
-        lines.append("Injury    = OUT-SEASON | OUT | DTD (Day-To-Day) | - (not on injury report)")
+        lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)  [based on games played ratio, NOT current injury]")
+        lines.append("Injury    = Current ESPN injury status: OUT-SEASON | OUT | SUSP | DTD (Day-To-Day) | - (not on report)")
         lines.append("Recent    = Active (played <3d ago) | Questionable (3-10d) | Inactive (>10d)")
 
     # Show injury notes for any recommended player with an injury
@@ -781,11 +781,11 @@ def format_recommendations(
 
 
 def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
-    """Streaming mode: find the best available player with a game *today*.
+    """Streaming mode: find the best available player with a game *tomorrow*.
 
     Identifies your weakest roster spot, filters the waiver pool to only
-    players whose team plays today, and ranks them with need-weighting.
-    Designed for daily streaming add/drops to maximise counting stats.
+    players whose team plays tomorrow, and ranks them with need-weighting.
+    Designed for daily streaming add/drops to maximise counting stats for the next day (for overnight FAAB leagues).
 
     Args:
         return_data: If True, return the recommendations DataFrame for
@@ -794,13 +794,13 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     Returns:
         None normally, or recommendations DataFrame if return_data=True.
     """
-    from datetime import date as _date
+    from datetime import date as _date, timedelta
 
     from src.colors import cyan, green, red, bold, colorize_z_score
 
-    today = _date.today()
+    tomorrow = _date.today() + timedelta(days=1)
     print(cyan("=" * 70))
-    print(cyan(f"  STREAMING ADVISOR — {today.strftime('%A %B %d, %Y')}"))
+    print(cyan(f"  STREAMING ADVISOR — {tomorrow.strftime('%A %B %d, %Y')} (tomorrow's games)"))
     print(cyan("=" * 70))
     print()
 
@@ -841,8 +841,8 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     available_stats = nba_stats[available_mask].copy()
     print(f"  {len(available_stats)} players on waivers\n")
 
-    # ---- Today's schedule ----
-    print("Checking today's NBA schedule...")
+    # ---- Tomorrow's schedule ----
+    print("Checking tomorrow's NBA schedule...")
     try:
         from src.schedule_analyzer import (
             fetch_nba_schedule,
@@ -855,27 +855,28 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
         print(f"  ERROR: Could not fetch schedule: {e}")
         return
 
-    teams_today: set[str] = set()
-    for game in schedule:
-        if game["game_date"] == today:
-            teams_today.add(game["home_team"])
-            teams_today.add(game["away_team"])
 
-    if not teams_today:
-        print(red("\n  No NBA games scheduled for today. Nothing to stream."))
+    teams_tomorrow: set[str] = set()
+    for game in schedule:
+        if game["game_date"] == tomorrow:
+            teams_tomorrow.add(game["home_team"])
+            teams_tomorrow.add(game["away_team"])
+
+    if not teams_tomorrow:
+        print(red("\n  No NBA games scheduled for tomorrow. Nothing to stream."))
         return
 
-    print(f"  {len(teams_today) // 2} games today — {len(teams_today)} teams playing")
+    print(f"  {len(teams_tomorrow) // 2} games tomorrow — {len(teams_tomorrow)} teams playing")
 
-    # Filter available players to only those on teams playing today
+    # Filter available players to only those on teams playing tomorrow
     available_stats["_team_norm"] = available_stats["TEAM_ABBREVIATION"].apply(
         lambda t: normalize_team_abbr(str(t))
     )
-    streaming_pool = available_stats[available_stats["_team_norm"].isin(teams_today)].copy()
-    print(f"  {len(streaming_pool)} available players with a game today\n")
+    streaming_pool = available_stats[available_stats["_team_norm"].isin(teams_tomorrow)].copy()
+    print(f"  {len(streaming_pool)} available players with a game tomorrow\n")
 
     if streaming_pool.empty:
-        print(red("  No unowned players have a game today."))
+        print(red("  No unowned players have a game tomorrow."))
         return
 
     # ---- Roster analysis ----
@@ -894,6 +895,53 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
         weakest_cats = list(team_needs.keys())[:3]
         print(f"  Target categories: {', '.join(weakest_cats)}\n")
 
+    # ---- IL/IL+ compliance check (smart stream evaluation) ----
+    il_action = None  # Will hold recommendation dict if IL violation exists
+    try:
+        from src.transactions import check_il_compliance, evaluate_il_resolution
+        il_violations = check_il_compliance(query)
+        if il_violations:
+            print(cyan("  ── IL/IL+ COMPLIANCE ──"))
+            for v in il_violations:
+                print(f"  ⚠ {v['player']} in {v['slot']} slot — "
+                      f"status: {v['status']} (needs: {v['eligible_statuses']})")
+
+            il_strategies = evaluate_il_resolution(
+                il_violations, roster_df, nba_stats,
+                droppable, mode="stream",
+            )
+
+            for st in il_strategies:
+                v = st["violation"]
+                il_name = v["player"]
+                il_z = st["il_z"]
+                reg_name = st.get("regular_player", "?")
+                reg_z = st.get("regular_z", 0)
+
+                if st["strategy"] == "drop_regular":
+                    print(f"  → Recommended: DROP {red(reg_name)} (z: {red(f'{reg_z:+.2f}')}),"
+                          f" ACTIVATE {green(il_name)} (z: {green(f'{il_z:+.2f}')})")
+                    print(f"    {il_name} replaces {reg_name} as a roster upgrade — "
+                          f"no streaming add needed.")
+                    il_action = {
+                        "strategy": "drop_regular",
+                        "il_player": il_name, "il_z": il_z,
+                        "drop_player": reg_name, "drop_z": reg_z,
+                        "slot": v["slot"],
+                    }
+                else:
+                    print(f"  → Recommended: DROP {red(il_name)} (z: {red(f'{il_z:+.2f}')}) "
+                          f"from {v['slot']} to clear violation, then stream normally.")
+                    il_action = {
+                        "strategy": "drop_il",
+                        "il_player": il_name, "il_z": il_z,
+                        "drop_player": il_name, "drop_z": il_z,
+                        "slot": v["slot"],
+                    }
+            print()
+    except Exception as e:
+        print(f"  Warning: could not check IL compliance: {e}\n")
+
     # ---- Score streaming candidates ----
     # Fetch injury data
     injury_lookup = {}
@@ -902,8 +950,8 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
         injuries = fetch_injury_report()
         injury_lookup = build_injury_lookup(injuries)
 
-    # Build schedule counts for today only (1 game for each playing team)
-    today_game_counts = {team: 1 for team in teams_today}
+    # Build schedule counts for tomorrow only (1 game for each playing team)
+    tomorrow_game_counts = {team: 1 for team in teams_tomorrow}
 
     # Recent activity check for the streaming pool
     candidate_ids = (
@@ -921,7 +969,7 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
         team_needs=team_needs,
         recent_activity=recent_activity,
         injury_lookup=injury_lookup,
-        schedule_game_counts=None,  # Skip schedule mult — all have games today
+        schedule_game_counts=None,  # Skip schedule mult — all have games tomorrow
         avg_games_per_week=3.5,
     )
 
@@ -956,7 +1004,7 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
         )
 
     print(cyan("=" * 90))
-    print(cyan(f"BEST STREAMING PICKUPS FOR TODAY ({today.strftime('%b %d')})"))
+    print(cyan(f"BEST STREAMING PICKUPS FOR TOMORROW ({tomorrow.strftime('%b %d')})"))
     print(cyan("=" * 90))
     print()
     print(
@@ -971,18 +1019,37 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     print()
 
     # Roster impact for top pick vs weakest player
-    if droppable and not recommendations.empty:
-        top_pick = recommendations.iloc[0]["Player"]
-        impact = compute_roster_impact(top_pick, droppable[0], nba_stats)
+    if il_action and il_action["strategy"] == "drop_regular":
+        # IL player replaces worst regular player — that IS the streaming move
+        print(f"  ★ Best move tomorrow: ACTIVATE {green(il_action['il_player'])} "
+              f"from {il_action['slot']} / DROP {red(il_action['drop_player'])}")
+        impact = compute_roster_impact(
+            il_action["il_player"], il_action["drop_player"], nba_stats
+        )
         if impact:
-            print(f"  Suggested move: ADD {green(top_pick)} / DROP {red(droppable[0])}")
+            print(f"  Roster impact:  {impact['summary']}")
+        print()
+        print("  Your IL player returning is a better upgrade than streaming tomorrow.")
+        print("  Clear the IL violation first, then evaluate streaming picks.\n")
+    elif droppable and not recommendations.empty:
+        top_pick = recommendations.iloc[0]["Player"]
+        drop_target = droppable[0]
+        # If there's a drop_il action, note it above the streaming suggestion
+        if il_action and il_action["strategy"] == "drop_il":
+            print(f"  ★ First: DROP {red(il_action['il_player'])} from "
+                  f"{il_action['slot']} to clear IL violation")
+        impact = compute_roster_impact(top_pick, drop_target, nba_stats)
+        if impact:
+            print(f"  Suggested move: ADD {green(top_pick)} / DROP {red(drop_target)}")
             print(f"  Roster impact:  {impact['summary']}")
             print()
 
-    print("  Streaming = daily add/drop to fill your roster with players who have games today.")
+    print("  Streaming = daily add/drop to fill your roster with players who have games tomorrow.")
     print("  Run with --claim to submit the transaction.\n")
 
     if return_data:
+        # Attach IL action metadata so the email report can include it
+        recommendations.attrs["il_action"] = il_action
         return recommendations
     return None
 
@@ -1103,7 +1170,9 @@ def run_waiver_analysis(
     my_player_names = [d["name"] for d in my_roster_details]
     print(f"Your roster ({len(my_player_names)} players):")
     for d in my_roster_details:
-        print(f"    {d['name']:<25} {d['position']:<10} {d['team'].upper()}")
+        slot = d.get("selected_position", "")
+        slot_tag = f"  [{slot}]" if slot in ("IL", "IL+") else ""
+        print(f"    {d['name']:<25} {d['team'].upper()}{slot_tag}")
     print()
 
     # ---------------------------------------------------------------
