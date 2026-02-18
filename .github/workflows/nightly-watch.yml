@@ -1,0 +1,102 @@
+# NBA Fantasy Advisor — Scheduled Watch Mode
+#
+# Runs the full waiver analysis at 11:00 PM ET every day and emails results.
+# Designed for GitHub Actions (free tier) so your laptop can be off.
+#
+# ─── Required Secrets ───────────────────────────────────────────────
+#   YAHOO_CONSUMER_KEY       Yahoo Developer App key
+#   YAHOO_CONSUMER_SECRET    Yahoo Developer App secret
+#   YAHOO_LEAGUE_ID          Your fantasy league ID
+#   YAHOO_TEAM_ID            Your team number
+#   YAHOO_ACCESS_TOKEN       OAuth access token  (from .env after first local run)
+#   YAHOO_REFRESH_TOKEN      OAuth refresh token (from .env after first local run)
+#   YAHOO_TOKEN_TYPE         Usually "bearer"
+#   NOTIFY_EMAIL_TO          Recipient email (your Gmail address)
+#   NOTIFY_SMTP_PASSWORD     Gmail App Password (NOT your account password)
+#
+# ─── Setup ──────────────────────────────────────────────────────────
+#   1. Push the repo to GitHub (private repo is fine)
+#   2. Run locally once to complete Yahoo OAuth: python main.py --list-leagues
+#   3. Copy the token values from your .env file
+#   4. Add all secrets above via: Settings → Secrets → Actions
+#   5. Enable the workflow (Actions tab → enable)
+#
+# The workflow builds a .env file from secrets at runtime so the Yahoo
+# OAuth token persists across runs.  If the token is refreshed during a
+# run, the new values are saved as updated secrets automatically.
+# ────────────────────────────────────────────────────────────────────
+
+name: "Nightly Waiver Report"
+
+on:
+  schedule:
+    # 11:00 PM ET = 04:00 UTC next day (EST)
+    # Adjust for EDT (summer): 03:00 UTC
+    - cron: "0 4 * * *"
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build .env from secrets
+        env:
+          YAHOO_CONSUMER_KEY: ${{ secrets.YAHOO_CONSUMER_KEY }}
+          YAHOO_CONSUMER_SECRET: ${{ secrets.YAHOO_CONSUMER_SECRET }}
+          YAHOO_LEAGUE_ID: ${{ secrets.YAHOO_LEAGUE_ID }}
+          YAHOO_TEAM_ID: ${{ secrets.YAHOO_TEAM_ID }}
+          YAHOO_ACCESS_TOKEN: ${{ secrets.YAHOO_ACCESS_TOKEN }}
+          YAHOO_REFRESH_TOKEN: ${{ secrets.YAHOO_REFRESH_TOKEN }}
+          YAHOO_TOKEN_TYPE: ${{ secrets.YAHOO_TOKEN_TYPE }}
+          NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_SMTP_PASSWORD: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
+        run: |
+          cat > .env << 'ENVEOF'
+          YAHOO_CONSUMER_KEY=${{ secrets.YAHOO_CONSUMER_KEY }}
+          YAHOO_CONSUMER_SECRET=${{ secrets.YAHOO_CONSUMER_SECRET }}
+          YAHOO_LEAGUE_ID=${{ secrets.YAHOO_LEAGUE_ID }}
+          YAHOO_TEAM_ID=${{ secrets.YAHOO_TEAM_ID }}
+          YAHOO_GAME_CODE=nba
+          YAHOO_ACCESS_TOKEN=${{ secrets.YAHOO_ACCESS_TOKEN }}
+          YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
+          YAHOO_TOKEN_TYPE=${{ secrets.YAHOO_TOKEN_TYPE }}
+          NOTIFY_EMAIL_TO=${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_SMTP_PASSWORD=${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          ENVEOF
+
+      - name: Fix OUTPUT_DIR for Linux
+        run: |
+          # config.py uses a Windows WSL path — override for GitHub runner
+          mkdir -p outputs
+          sed -i 's|OUTPUT_DIR = .*|OUTPUT_DIR = Path("outputs")|' config.py
+
+      - name: Run watch analysis
+        run: python main.py --watch
+        timeout-minutes: 10
+
+      - name: Upload output artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waiver-report-${{ github.run_number }}
+          path: outputs/
+          retention-days: 7

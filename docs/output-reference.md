@@ -115,12 +115,28 @@ Fetched from ESPN's public NBA injury API:
 
 | Value | Meaning | Base Score Multiplier |
 |-------|---------|----------------------|
-| `OUT-SEASON` | Confirmed out for the remainder of the season | ×0.00 (removed) |
+| `OUT-SEASON` | Confirmed out for the remainder of the season | ×0.00 (removed from list) |
+| `SUSP` | Suspended — multiplier computed from suspension games vs. remaining fantasy schedule | ×0.0 to ×0.85 (dynamic, see below) |
 | `OUT` | Currently out, timeline varies | ×0.10 to ×0.40 (contextual) |
 | `DTD` | Day-to-day, could play any game | ×0.90 to ×0.95 |
 | `-` | Not on the injury report | ×1.00 (no penalty) |
 
-The actual multiplier is adjusted based on keywords in the news blurb (e.g., "no timetable" makes it harsher, "return after break" makes it lighter).
+The actual multiplier is adjusted based on keywords in the news blurb (e.g., "no timetable" makes it harsher, "return after break" makes it lighter). Players with a ×0.00 multiplier (OUT-SEASON, long suspensions) are fully excluded from the recommendation list.
+
+#### Suspension Multiplier (Dynamic)
+
+Suspension severity is computed relative to the team's remaining fantasy-season games, not just the raw game count:
+
+| Games Available / Games Remaining | Multiplier | Meaning |
+|-----------------------------------|------------|---------|
+| 0% (misses entire remaining schedule) | ×0.00 (excluded) | Season-ending suspension |
+| ≤ 15% | ×0.03 | Nearly season-ending |
+| ≤ 35% | ×0.10 | Misses most remaining games |
+| ≤ 60% | ×0.30 | Misses a significant chunk |
+| ≤ 85% | ×0.60 | Moderate miss |
+| > 85% | ×0.85 | Minor miss (1-2 games) |
+
+For example, a 25-game suspension with only 20 remaining games → 0 games available → ×0.00 (excluded). The same 25-game suspension with 80 remaining games → 55 available (69%) → ×0.30.
 
 ### Recent Flag
 
@@ -215,7 +231,7 @@ The tool uses ANSI color codes to highlight key information at a glance:
 |-------|----------|
 | **Green** | Healthy status, STRONG assessment, positive z-scores, FLEXIBLE/COMFORTABLE budget |
 | **Yellow** | DTD (Day-To-Day), Below Avg assessment, MODERATE budget |
-| **Red** | OUT / OUT-SEASON, WEAK assessment, negative z-scores, CONSERVE budget |
+| **Red** | OUT / OUT-SEASON / SUSP, WEAK assessment, negative z-scores, CONSERVE budget |
 | **Cyan** | Section headers and titles |
 | **Magenta** | Elite tier label |
 
@@ -283,6 +299,9 @@ python main.py --skip-yahoo --top 25
 | `--compact` | off | Show condensed table: Player, Team, Games_Wk, Injury, Z_Value, Adj_Score only |
 | `--faab-history` | off | Analyze league FAAB bid history and show suggested bids for all strategies |
 | `--strategy` | `competitive` | Override FAAB bidding strategy: `value`, `competitive`, or `aggressive` |
+| `--stream` | off | Streaming mode: find the best available player with a game today for your weakest roster spot |
+| `--list-leagues` | off | Show all Yahoo Fantasy NBA leagues you belong to and exit |
+| `--list-teams` | off | Show all teams in your league with IDs and managers, then exit |
 
 ---
 
@@ -339,3 +358,115 @@ Same metrics for your droppable players, allowing direct comparison.
 Head-to-head comparison showing the net gain from picking up each waiver target vs. your best droppable player.
 
 See [Schedule Analysis](schedule-analysis.md) for the complete methodology.
+
+---
+
+## 7. Auto-Detect League Settings
+
+On startup (when Yahoo is connected), the tool reads your league's metadata via the Yahoo API and automatically overrides config defaults:
+
+- **Transaction limit**: `WEEKLY_TRANSACTION_LIMIT` is set from the league's `max_adds` setting.
+- **FAAB mode**: `FAAB_ENABLED` is set based on the league's waiver type (`FAAB` vs. waiver priority).
+- **Stat categories**: Validates that the league uses the expected 9 scoring categories and warns if any are missing or extra.
+- **Roster positions**: Reports active, bench, and IL slot counts from the league roster structure.
+- **Team count**: Reports the number of teams in the league.
+
+Example output:
+```
+  Auto-detected league settings:
+    Transaction limit: 4 adds/week (from Yahoo)
+    FAAB bidding: enabled (waiver_type=FAAB)
+    Stat categories: 9/9 expected categories confirmed
+    Roster: 10 active + 3 bench + 2 IL slots
+    League size: 12 teams
+```
+
+---
+
+## 8. League & Team Discovery
+
+### `--list-leagues`
+
+Shows all Yahoo Fantasy NBA leagues you belong to:
+
+```
+  Your NBA Fantasy Leagues (2):
+  ID       Name                                Season   Teams   Scoring
+  ──────── ─────────────────────────────────── ──────── ─────── ───────────────
+  94443    My H2H League                        2024     12      head
+  88712    Office Pool                          2024     10      roto
+```
+
+### `--list-teams`
+
+Shows all teams in your current league with IDs and managers:
+
+```
+  Teams in League 94443 (12):
+  ID    Team Name                      Manager              Yours
+  ───── ────────────────────────────── ──────────────────── ─────
+  1     Giannis Gang                   Mike                 
+  9     Court Crushers                 Josh                  ←
+  12    Block Party                    Sarah                
+```
+
+Use these to find the correct `YAHOO_LEAGUE_ID` and `YAHOO_TEAM_ID` for your `.env` file.
+
+---
+
+## 9. Roster Impact Preview
+
+When submitting a waiver claim (`--claim` or `--dry-run`), a roster impact preview is shown before confirming:
+
+```
+  Roster Impact: ADD Nikola Jović / DROP Kevin Love
+    FG% +0.3, FT% -0.1, 3PM +0.2, PTS +1.4, REB -0.5, AST +0.3, STL +0.1, BLK +0.2, TO -0.1  →  net +1.8 z-score
+```
+
+- Each category shows the z-score change (add_z − drop_z).
+- Green values (≥ +0.3) indicate meaningful improvement; red (≤ −0.3) indicate regression.
+- The net z-score summarises the total impact of the swap across all non-punt categories.
+
+---
+
+## 10. Streaming Mode (`--stream`)
+
+Streaming mode finds the best available player with a game **today** and recommends them as a daily add/drop:
+
+```bash
+python main.py --stream
+```
+
+### How it works
+
+1. Fetches today's NBA schedule to identify which teams play.
+2. Filters the waiver pool to only players on teams with a game today.
+3. Analyzes your roster to identify your weakest spot (lowest z-score player).
+4. Scores streaming candidates using the same need-weighted algorithm.
+5. Shows the top picks with a roster impact preview for the #1 recommendation.
+
+### Example output
+
+```
+======================================================================
+  STREAMING ADVISOR — Wednesday January 15, 2025
+======================================================================
+
+  8 games today — 16 teams playing
+  42 available players with a game today
+
+  Weakest roster spot: Kevin Love (z-score: -1.24)
+  Target categories: STL, REB, BLK
+
+==========================================================================================
+BEST STREAMING PICKUPS FOR TODAY (Jan 15)
+==========================================================================================
+
+ Rank  Player            Team  Injury  FG%    FT%    3PM   PTS   REB   AST   STL  BLK  TO   Z_Value  Adj_Score
+─────  ────────────────  ────  ──────  ─────  ─────  ────  ────  ────  ────  ───  ───  ───  ───────  ─────────
+    1  Paul Reed         PHI   -       0.524  0.712  0.2   12.1  8.3   1.5   1.1  1.4  1.2    +3.82     +5.14
+    ...
+
+  Suggested move: ADD Paul Reed / DROP Kevin Love
+  Roster impact:  FG% +0.1, REB +1.2, STL +0.3, BLK +0.8  →  net +2.1 z-score
+```

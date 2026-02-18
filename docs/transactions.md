@@ -30,6 +30,7 @@ The flow supports **multiple bids per session** — you can queue several add/dr
 ├─────────────────────────────────────┤
 │  6. Multi-bid loop                  │
 │     Select drop/add + FAAB bid      │
+│     Roster impact preview per swap  │
 │     Repeat for additional claims    │
 ├─────────────────────────────────────┤
 │  7. Review & confirm queued claims  │
@@ -253,7 +254,31 @@ Yahoo's Fantasy API expects an XML payload for write operations. The module buil
 </fantasy_content>
 ```
 
-### 3. API submission
+### 3. Roster impact preview
+
+Before confirming each add/drop swap, the tool computes a per-category z-score delta showing the projected impact on your roster:
+
+$$
+\Delta z_c = z_{\text{add},c} - z_{\text{drop},c}
+$$
+
+For each non-punted stat category, the display shows the player's raw z-score and the net delta. Positive deltas (≥ +0.3) are highlighted green, negative deltas (≤ −0.3) red. A net summary row sums all category deltas.
+
+This lets you see exactly which categories improve or worsen from a swap before committing — for example, you might see that adding a player boosts your assists and steals but hurts your FT%. The preview appears in both `--claim` and `--dry-run` modes.
+
+Example output:
+
+```
+  Roster Impact: Drop Bench Warmer → Add Breakout Guard
+  ──────────────────────────────────────────────────────
+  FG%   +0.42   FT%   -0.18   3PM   +0.85
+  PTS   +1.20   REB   -0.50   AST   +0.93
+  STL   +0.30   BLK   -0.10   TO    +0.25
+  ──────────────────────────────────────────────────────
+  Net:  +3.17
+```
+
+### 4. API submission
 
 The module reuses **yfpy's authenticated OAuth session** for all API calls:
 
@@ -321,9 +346,11 @@ src/transactions.py
 │   └── submit_roster_move()             # PUT via yfpy OAuth
 ├── High-level flow
 │   ├── submit_add_drop()                # Resolve + build + submit
+│   ├── compute_roster_impact()          # Per-category z-delta for add/drop swap
 │   └── run_transaction_flow()           # Interactive multi-bid menu
 │       ├── IL auto-resolution           # Pre-flight fix for IL violations
 │       ├── FAAB analysis integration    # Inline bid suggestions
+│       ├── Roster impact preview        # Show z-delta before confirming swap
 │       ├── _unique_drops_used()         # Count unique drop players in queue
 │       ├── Multi-bid queue loop         # Queue multiple claims
 │       └── Batch submission             # Submit all claims sequentially

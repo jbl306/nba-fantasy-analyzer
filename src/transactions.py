@@ -983,6 +983,17 @@ def run_transaction_flow(
             add_name = rec_df.iloc[add_idx].get("Player", "")
             add_score = float(rec_df.iloc[add_idx].get("Adj_Score", 0))
 
+            # ------ Roster impact preview ------
+            if nba_stats is not None:
+                try:
+                    from src.waiver_advisor import compute_roster_impact
+                    impact = compute_roster_impact(add_name, drop_name, nba_stats)
+                    if impact:
+                        print(f"\n  Roster Impact: ADD {add_name} / DROP {drop_name}")
+                        print(f"  {impact['summary']}")
+                except Exception:
+                    pass  # Non-critical — don't block the transaction
+
             # FAAB bid with smart suggestion
             faab_bid = None
             if config.FAAB_ENABLED:

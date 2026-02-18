@@ -72,6 +72,9 @@ python main.py --dry-run                   # Preview a claim without submitting
 python main.py --faab-history              # Analyze league FAAB bid history
 python main.py --strategy aggressive       # FAAB bidding strategy (value|competitive|aggressive)
 python main.py --compact                   # Compact table: Player, Team, Z, Score, Injury, Schedule
+python main.py --stream                    # Streaming mode: best pickup with a game today
+python main.py --list-leagues              # Show all your Yahoo Fantasy NBA leagues
+python main.py --list-teams                # Show all teams in your league
 python main.py --skip-yahoo --top 30
 ```
 
@@ -89,6 +92,10 @@ python main.py --skip-yahoo --top 30
 10. **Color-Coded Output**: ANSI color-coded terminal output — green (Healthy/STRONG), yellow (DTD/Below Avg), red (OUT/WEAK) — with `NO_COLOR` support
 11. **Compact Mode**: `--compact` flag shows a condensed table (Player, Team, Z_Value, Adj_Score, Injury, Games_Wk)
 12. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, hot-pickup indicators, and schedule data
+13. **Auto-Detect League Settings**: On startup, reads Yahoo API league metadata (stat categories, roster positions, FAAB/waiver type, transaction limits) and auto-overrides config defaults — no manual tuning needed.
+14. **League & Team Discovery**: `--list-leagues` shows all Yahoo Fantasy NBA leagues you belong to; `--list-teams` lists every team in the current league with IDs and manager names.
+15. **Roster Impact Preview**: Before confirming a waiver claim, shows the per-category z-score delta (ADD vs. DROP) so you can see exactly which categories improve or regress.
+16. **Streaming Mode**: `--stream` finds the best available waiver pickup whose team plays *today*, identifies your weakest roster spot, and shows the roster impact of the swap.
 
 ## Project Structure
 
@@ -168,3 +175,5 @@ nba-fantasy-advisor/
 - **Hot-pickup detection**: Fetches last N game logs per candidate and z-scores recent performance against season averages. Players with z_delta ≥ 1.0 are flagged as 🔥 Hot. Recency boost = `RECENCY_WEIGHT × z_delta` (additive to Adj_Score).
 - **Yahoo trending integration**: Queries Yahoo ownership-change data in batches. Players gaining ≥ 5% ownership are flagged as 📈 Trending. Trending boost = `TRENDING_WEIGHT × min(delta/10, 3.0)` (additive to Adj_Score).
 - **Expanded candidate pool**: When hot-pickup is enabled, the candidate pool is expanded to `TOP_N × 3` to ensure breakout performers ranked lower by season z-score are still evaluated.
+- **Auto-detect league settings**: On startup, `apply_yahoo_settings()` reads the Yahoo API response and patches `WEEKLY_TRANSACTION_LIMIT`, `FAAB_ENABLED`, validates 9-cat stat categories, and reports roster slot counts — so your config matches your league automatically.
+- **Streaming mode**: `--stream` fetches today's NBA schedule, filters the waiver pool to only players with a game today, and ranks them using the same need-weighted scoring. Shows your weakest roster spot and the roster impact of the top suggested swap.

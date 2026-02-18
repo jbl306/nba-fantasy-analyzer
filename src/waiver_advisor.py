@@ -265,6 +265,80 @@ def compute_roster_strength(team_needs: dict[str, float]) -> dict[str, Any]:
     }
 
 
+def compute_roster_impact(
+    add_name: str,
+    drop_name: str,
+    nba_stats: pd.DataFrame,
+) -> dict[str, Any] | None:
+    """Compute the category-by-category z-score impact of an add/drop.
+
+    Shows what happens to your team's z-scores when you drop one player
+    and add another — positive deltas mean the swap improves that category.
+
+    Args:
+        add_name: Name of the player being added.
+        drop_name: Name of the player being dropped.
+        nba_stats: Full NBA stats DataFrame with z-score columns.
+
+    Returns:
+        Dict with per-category deltas, net z-total change, and formatted
+        summary string.  None if either player can't be matched.
+    """
+    add_idx = match_yahoo_to_nba(add_name, nba_stats)
+    drop_idx = match_yahoo_to_nba(drop_name, nba_stats)
+
+    if add_idx is None or drop_idx is None:
+        return None
+
+    add_row = nba_stats.loc[add_idx]
+    drop_row = nba_stats.loc[drop_idx]
+
+    punt_names = {c.upper() for c in config.PUNT_CATEGORIES}
+    deltas: dict[str, float] = {}
+    net_total = 0.0
+
+    for stat_key, cat_info in config.STAT_CATEGORIES.items():
+        if cat_info["name"].upper() in punt_names:
+            continue
+        z_col = f"Z_{stat_key}"
+        if z_col in add_row.index and z_col in drop_row.index:
+            add_z = float(add_row.get(z_col, 0))
+            drop_z = float(drop_row.get(z_col, 0))
+            delta = add_z - drop_z
+            deltas[cat_info["name"]] = round(delta, 2)
+            net_total += delta
+
+    # Build formatted summary
+    from src.colors import green, red
+    parts: list[str] = []
+    for cat_name, delta in deltas.items():
+        sign = "+" if delta >= 0 else ""
+        val_str = f"{sign}{delta:.1f}"
+        if delta >= 0.3:
+            parts.append(f"{cat_name} {green(val_str)}")
+        elif delta <= -0.3:
+            parts.append(f"{cat_name} {red(val_str)}")
+        else:
+            parts.append(f"{cat_name} {val_str}")
+
+    net_sign = "+" if net_total >= 0 else ""
+    net_str = f"{net_sign}{net_total:.1f}"
+    if net_total >= 0.5:
+        net_str = green(net_str)
+    elif net_total <= -0.5:
+        net_str = red(net_str)
+
+    summary = ", ".join(parts) + f"  →  net {net_str} z-score"
+
+    return {
+        "deltas": deltas,
+        "net_total": round(net_total, 2),
+        "summary": summary,
+        "add_name": add_name,
+        "drop_name": drop_name,
+    }
+
+
 def format_team_analysis(roster_df: pd.DataFrame, team_needs: dict) -> str:
     """Format team analysis as a readable string with color-coded assessments."""
     from src.colors import (
@@ -362,6 +436,7 @@ def score_available_players(
 
     # Pre-build per-team multi-week game counts for decay-weighted multiplier
     team_week_data: dict[str, list[tuple[int, float]]] = {}
+    team_total_remaining: dict[str, int] = {}  # total games left in tracked weeks
     if schedule_analysis and schedule_analysis.get("weeks"):
         from src.schedule_analyzer import normalize_team_abbr as _norm
         weeks_data = schedule_analysis["weeks"]
@@ -373,6 +448,8 @@ def score_available_players(
                 (wk["game_counts"].get(team, 0), wk["avg_games"])
                 for wk in weeks_data
             ]
+        # Also grab pre-computed totals for suspension math
+        team_total_remaining = schedule_analysis.get("total_game_counts", {})
 
     recommendations = []
 
@@ -423,6 +500,47 @@ def score_available_players(
                 injury_info, max_blurb_len=config.INJURY_BLURB_MAX_LENGTH
             )
             injury_mult = injury_info["severity_multiplier"]
+
+            # --- Dynamic suspension multiplier ---
+            # Sentinel -1.0 means the injury module deferred to us
+            # so we can factor in remaining fantasy-season games.
+            if injury_mult == -1.0:
+                from src.schedule_analyzer import normalize_team_abbr as _norm_t
+                susp_games = injury_info.get("suspension_games")
+                team_abbr = _norm_t(str(row.get("TEAM_ABBREVIATION", "")))
+                remaining = team_total_remaining.get(team_abbr, 0)
+
+                if susp_games is None:
+                    # Unknown suspension length — assume harsh
+                    injury_mult = 0.05
+                elif remaining <= 0:
+                    # No schedule data — fall back to static thresholds
+                    if susp_games >= 10:
+                        injury_mult = 0.0
+                    elif susp_games >= 5:
+                        injury_mult = 0.03
+                    elif susp_games >= 2:
+                        injury_mult = 0.15
+                    else:
+                        injury_mult = 0.85
+                else:
+                    # Compute fraction of remaining games the player
+                    # will actually be available for.
+                    games_available = max(remaining - susp_games, 0)
+                    avail_frac = games_available / remaining
+
+                    if avail_frac == 0:
+                        injury_mult = 0.0    # misses entire remaining schedule
+                    elif avail_frac <= 0.15:
+                        injury_mult = 0.03   # nearly season-ending
+                    elif avail_frac <= 0.35:
+                        injury_mult = 0.10   # misses most remaining games
+                    elif avail_frac <= 0.60:
+                        injury_mult = 0.30   # misses a significant chunk
+                    elif avail_frac <= 0.85:
+                        injury_mult = 0.60   # moderate miss
+                    else:
+                        injury_mult = 0.85   # minor miss (1-2 games)
         else:
             rec["Injury"] = "-"
             rec["Injury_Note"] = "-"
@@ -511,8 +629,24 @@ def score_available_players(
                         * min(delta / 10.0, 3.0)  # cap at ~30% delta equivalent
                     )
 
+        # ---------------------------------------------------------------
         # Apply availability discount, injury penalty, schedule multiplier,
         # PLUS additive hot-pickup and trending boosts
+        # ---------------------------------------------------------------
+
+        # Hard-skip players who are completely eliminated (OUT-SEASON,
+        # long suspension, etc.) — multiplier of exactly 0.0 means
+        # they won't play again this fantasy season.
+        if injury_mult == 0.0:
+            continue
+
+        # For near-eliminated players (extended OUT, long suspension)
+        # zero out additive boosts so they can't be rescued by
+        # trending/recency signals alone.
+        if injury_mult <= 0.05:
+            recency_boost = 0.0
+            trending_boost = 0.0
+
         adj_score = (
             need_score * avail_mult * injury_mult * schedule_mult
             + recency_boost
@@ -646,6 +780,202 @@ def format_recommendations(
     return "\n".join(lines)
 
 
+def run_streaming_analysis() -> None:
+    """Streaming mode: find the best available player with a game *today*.
+
+    Identifies your weakest roster spot, filters the waiver pool to only
+    players whose team plays today, and ranks them with need-weighting.
+    Designed for daily streaming add/drops to maximise counting stats.
+    """
+    from datetime import date as _date
+
+    from src.colors import cyan, green, red, bold, colorize_z_score
+
+    today = _date.today()
+    print(cyan("=" * 70))
+    print(cyan(f"  STREAMING ADVISOR — {today.strftime('%A %B %d, %Y')}"))
+    print(cyan("=" * 70))
+    print()
+
+    # ---- Yahoo connection ----
+    print("Connecting to Yahoo Fantasy Sports...")
+    query = create_yahoo_query()
+
+    # League settings (for auto-detect)
+    league_settings: dict = {}
+    game_weeks: list[dict] | None = None
+    try:
+        from src.league_settings import (
+            fetch_league_settings as fetch_settings,
+            apply_yahoo_settings,
+            fetch_game_weeks,
+        )
+        league_settings = fetch_settings(query)
+        if league_settings:
+            auto_msgs = apply_yahoo_settings(league_settings)
+            if auto_msgs:
+                print("\n  Auto-detected league settings:")
+                for msg in auto_msgs:
+                    print(f"    {msg}")
+        game_weeks = fetch_game_weeks(query)
+    except Exception as e:
+        print(f"  Warning: could not fetch league settings: {e}")
+
+    # ---- Rosters ----
+    print("\nFetching all team rosters...")
+    all_rosters, owned_names = get_all_team_rosters(query)
+    my_roster = get_my_team_roster(query)
+    print(f"  {len(all_rosters)} teams, {len(owned_names)} owned players\n")
+
+    # ---- NBA stats ----
+    nba_stats = build_player_stats_table()
+    nba_stats["_norm_name"] = nba_stats["PLAYER_NAME"].apply(normalize_name)
+    available_mask = ~nba_stats["_norm_name"].isin(owned_names)
+    available_stats = nba_stats[available_mask].copy()
+    print(f"  {len(available_stats)} players on waivers\n")
+
+    # ---- Today's schedule ----
+    print("Checking today's NBA schedule...")
+    try:
+        from src.schedule_analyzer import (
+            fetch_nba_schedule,
+            normalize_team_abbr,
+            get_upcoming_weeks,
+            build_schedule_analysis,
+        )
+        schedule = fetch_nba_schedule()
+    except Exception as e:
+        print(f"  ERROR: Could not fetch schedule: {e}")
+        return
+
+    teams_today: set[str] = set()
+    for game in schedule:
+        if game["game_date"] == today:
+            teams_today.add(game["home_team"])
+            teams_today.add(game["away_team"])
+
+    if not teams_today:
+        print(red("\n  No NBA games scheduled for today. Nothing to stream."))
+        return
+
+    print(f"  {len(teams_today) // 2} games today — {len(teams_today)} teams playing")
+
+    # Filter available players to only those on teams playing today
+    available_stats["_team_norm"] = available_stats["TEAM_ABBREVIATION"].apply(
+        lambda t: normalize_team_abbr(str(t))
+    )
+    streaming_pool = available_stats[available_stats["_team_norm"].isin(teams_today)].copy()
+    print(f"  {len(streaming_pool)} available players with a game today\n")
+
+    if streaming_pool.empty:
+        print(red("  No unowned players have a game today."))
+        return
+
+    # ---- Roster analysis ----
+    print("Analyzing your roster...")
+    roster_df = analyze_roster(my_roster, nba_stats)
+    team_needs = identify_team_needs(roster_df)
+    droppable = identify_droppable_players(roster_df)
+
+    # Show weakest roster spot
+    if droppable:
+        worst_player = droppable[0]
+        worst_idx = match_yahoo_to_nba(worst_player, nba_stats)
+        worst_z = nba_stats.loc[worst_idx, "Z_TOTAL"] if worst_idx is not None else 0
+        print(f"  Weakest roster spot: {bold(worst_player)} (z-score: {red(f'{worst_z:.2f}')})")
+    if team_needs:
+        weakest_cats = list(team_needs.keys())[:3]
+        print(f"  Target categories: {', '.join(weakest_cats)}\n")
+
+    # ---- Score streaming candidates ----
+    # Fetch injury data
+    injury_lookup = {}
+    if config.INJURY_REPORT_ENABLED:
+        from src.injury_news import fetch_injury_report, build_injury_lookup
+        injuries = fetch_injury_report()
+        injury_lookup = build_injury_lookup(injuries)
+
+    # Build schedule counts for today only (1 game for each playing team)
+    today_game_counts = {team: 1 for team in teams_today}
+
+    # Recent activity check for the streaming pool
+    candidate_ids = (
+        streaming_pool.sort_values("Z_TOTAL", ascending=False)
+        .head(config.DETAILED_LOG_LIMIT)["PLAYER_ID"]
+        .dropna().astype(int).tolist()
+    )
+    recent_activity = {}
+    if candidate_ids:
+        recent_activity = check_recent_activity(candidate_ids)
+
+    # Score with need-weighting (schedule mult disabled — all have 1 game)
+    recommendations = score_available_players(
+        streaming_pool,
+        team_needs=team_needs,
+        recent_activity=recent_activity,
+        injury_lookup=injury_lookup,
+        schedule_game_counts=None,  # Skip schedule mult — all have games today
+        avg_games_per_week=3.5,
+    )
+
+    if recommendations.empty:
+        print(red("  No viable streaming options found."))
+        return
+
+    # ---- Display results ----
+    top_n = min(config.TOP_N_RECOMMENDATIONS, len(recommendations))
+    df_show = recommendations.head(top_n).copy()
+
+    # Simplified display columns for streaming
+    display_cols = ["Player", "Team", "Injury"]
+    # Add stat category columns
+    for cat_info in config.STAT_CATEGORIES.values():
+        if cat_info["name"] in df_show.columns:
+            display_cols.append(cat_info["name"])
+    display_cols.extend(["Z_Value", "Adj_Score"])
+    display_cols = [c for c in display_cols if c in df_show.columns]
+
+    # Colorize
+    if "Injury" in df_show.columns:
+        from src.colors import colorize_injury
+        df_show["Injury"] = df_show["Injury"].apply(colorize_injury)
+    if "Z_Value" in df_show.columns:
+        df_show["Z_Value"] = df_show["Z_Value"].apply(
+            lambda v: colorize_z_score(float(v)) if v != "-" else v
+        )
+    if "Adj_Score" in df_show.columns:
+        df_show["Adj_Score"] = df_show["Adj_Score"].apply(
+            lambda v: colorize_z_score(float(v)) if v != "-" else v
+        )
+
+    print(cyan("=" * 90))
+    print(cyan(f"BEST STREAMING PICKUPS FOR TODAY ({today.strftime('%b %d')})"))
+    print(cyan("=" * 90))
+    print()
+    print(
+        tabulate(
+            df_show[display_cols],
+            headers="keys",
+            tablefmt="simple",
+            showindex=True,
+            numalign="right",
+        )
+    )
+    print()
+
+    # Roster impact for top pick vs weakest player
+    if droppable and not recommendations.empty:
+        top_pick = recommendations.iloc[0]["Player"]
+        impact = compute_roster_impact(top_pick, droppable[0], nba_stats)
+        if impact:
+            print(f"  Suggested move: ADD {green(top_pick)} / DROP {red(droppable[0])}")
+            print(f"  Roster impact:  {impact['summary']}")
+            print()
+
+    print("  Streaming = daily add/drop to fill your roster with players who have games today.")
+    print("  Run with --claim to submit the transaction.\n")
+
+
 def run_waiver_analysis(
     skip_yahoo: bool = False,
     return_data: bool = False,
@@ -735,9 +1065,16 @@ def run_waiver_analysis(
             fetch_league_settings as fetch_settings,
             format_settings_report,
             fetch_game_weeks,
+            apply_yahoo_settings,
         )
         league_settings = fetch_settings(query)
         if league_settings:
+            # Auto-override config defaults with actual Yahoo league rules
+            auto_msgs = apply_yahoo_settings(league_settings)
+            if auto_msgs:
+                print("\n  Auto-detected league settings:")
+                for msg in auto_msgs:
+                    print(f"    {msg}")
             print(format_settings_report(league_settings))
             print()
         game_weeks = fetch_game_weeks(query)

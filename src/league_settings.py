@@ -67,6 +67,133 @@ def fetch_league_settings(query) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Auto-detect league settings from Yahoo API
+# ---------------------------------------------------------------------------
+
+def apply_yahoo_settings(settings: dict[str, Any]) -> list[str]:
+    """Override config.py defaults with live Yahoo league settings.
+
+    Reads the settings dict returned by :func:`fetch_league_settings` and
+    patches ``config`` module attributes at runtime so every downstream
+    component uses the *actual* league rules without manual config edits.
+
+    Patches:
+      - ``WEEKLY_TRANSACTION_LIMIT`` from ``max_adds``
+      - ``FAAB_ENABLED`` from ``uses_faab``
+      - ``FAAB_BUDGET_REGULAR_SEASON`` / ``FAAB_BUDGET_PLAYOFFS`` (if FAAB)
+      - Stat-category validation (warns if league is not standard 9-cat)
+
+    Args:
+        settings: Dict from :func:`fetch_league_settings`.
+
+    Returns:
+        List of human-readable messages describing what was auto-detected.
+    """
+    messages: list[str] = []
+
+    # --- Weekly transaction limit ---
+    max_adds = settings.get("max_adds")
+    if max_adds is not None:
+        try:
+            limit = int(max_adds)
+            if limit > 0 and limit != config.WEEKLY_TRANSACTION_LIMIT:
+                old = config.WEEKLY_TRANSACTION_LIMIT
+                config.WEEKLY_TRANSACTION_LIMIT = limit
+                messages.append(
+                    f"Transaction limit: {old} → {limit}/week (from Yahoo)"
+                )
+            elif limit > 0:
+                messages.append(f"Transaction limit: {limit}/week ✓")
+        except (ValueError, TypeError):
+            pass
+
+    # --- FAAB detection ---
+    uses_faab = settings.get("uses_faab")
+    waiver_type = str(settings.get("waiver_type", "")).lower()
+
+    if uses_faab is not None:
+        faab_on = str(uses_faab) in ("1", "True", "true", "yes")
+    elif "faab" in waiver_type:
+        faab_on = True
+    else:
+        faab_on = None  # can't determine
+
+    if faab_on is not None and faab_on != config.FAAB_ENABLED:
+        config.FAAB_ENABLED = faab_on
+        messages.append(
+            f"FAAB: {'enabled' if faab_on else 'disabled'} (from Yahoo)"
+        )
+    elif faab_on is not None:
+        messages.append(f"FAAB: {'enabled' if faab_on else 'disabled'} ✓")
+
+    # --- Stat categories validation ---
+    stat_cats = settings.get("stat_categories")
+    if stat_cats and hasattr(stat_cats, "stats"):
+        active_ids: set[int] = set()
+        for stat_obj in stat_cats.stats:
+            stat = stat_obj.stat if hasattr(stat_obj, "stat") else stat_obj
+            stat_id = getattr(stat, "stat_id", None)
+            enabled = getattr(stat, "enabled", None)
+            is_display = getattr(stat, "is_only_display_stat", None)
+            if stat_id is not None and str(enabled) == "1" and str(is_display) != "1":
+                try:
+                    active_ids.add(int(stat_id))
+                except (ValueError, TypeError):
+                    pass
+
+        expected_ids = set(config.YAHOO_STAT_ID_MAP.keys())
+        missing = expected_ids - active_ids
+        extra = active_ids - expected_ids
+        # Filter extra to only known basketball stat IDs (ignore display stats)
+        known_extra = {sid for sid in extra if sid <= 30}
+
+        if missing:
+            missing_names = [
+                config.STAT_CATEGORIES.get(
+                    config.YAHOO_STAT_ID_MAP[sid], {}
+                ).get("name", f"ID:{sid}")
+                for sid in missing
+            ]
+            messages.append(
+                f"⚠  League missing expected categories: {', '.join(missing_names)}"
+            )
+        if known_extra:
+            messages.append(
+                f"ℹ  League has extra scored categories (stat IDs: {known_extra})"
+            )
+        if not missing and not known_extra:
+            messages.append("Stat categories: standard 9-cat ✓")
+
+    # --- Roster positions ---
+    positions = settings.get("roster_positions")
+    if positions and hasattr(positions, "__iter__"):
+        total_active = 0
+        bench = 0
+        il_slots = 0
+        for rp in positions:
+            pos_obj = rp.roster_position if hasattr(rp, "roster_position") else rp
+            pos = str(getattr(pos_obj, "position", getattr(pos_obj, "abbreviation", ""))).upper()
+            cnt = int(getattr(pos_obj, "count", 1) or 1)
+            if pos in ("BN", "BENCH"):
+                bench += cnt
+            elif pos in ("IL", "IL+", "IR", "IR+", "DL", "DL+"):
+                il_slots += cnt
+            else:
+                total_active += cnt
+        if total_active:
+            messages.append(
+                f"Roster: {total_active} active + {bench} bench + {il_slots} IL"
+            )
+
+    # --- Num teams ---
+    num_teams = settings.get("num_teams")
+    if num_teams is not None:
+        messages.append(f"Teams: {num_teams}")
+
+    return messages
+
+
+# ---------------------------------------------------------------------------
 # Yahoo API: FAAB balance
 # ---------------------------------------------------------------------------
 

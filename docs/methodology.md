@@ -4,12 +4,16 @@ This document describes how the NBA Fantasy Advisor generates waiver wire recomm
 
 ## Pipeline Overview
 
-The recommendation engine runs a six-step pipeline, with optional FAAB analysis and transaction submission:
+The recommendation engine runs a multi-step pipeline, with optional FAAB analysis and transaction submission:
 
 ```
 ┌──────────────────────────────────────────────────┐
 │  1. Connect to Yahoo Fantasy                     │
 │     Authenticate via OAuth2 and query the league │
+├──────────────────────────────────────────────────┤
+│  1b. Auto-detect league settings                 │
+│     Read stat categories, roster slots, FAAB,    │
+│     transaction limits from Yahoo API            │
 ├──────────────────────────────────────────────────┤
 │  2. Scan all league rosters                      │
 │     Fetch every team's roster → owned player set │
@@ -20,28 +24,58 @@ The recommendation engine runs a six-step pipeline, with optional FAAB analysis 
 │  4. Filter to available players only             │
 │     Remove all owned players from the stats pool │
 ├──────────────────────────────────────────────────┤
-│  5a. Check recent game activity (top 10)         │
+│  5a. Check recent game activity                  │
 │     Game logs to detect injuries / inactivity    │
 ├──────────────────────────────────────────────────┤
+│  5a-i. Hot-pickup analysis                       │
+│     Recent-game z-delta breakout detection (🔥)   │
+├──────────────────────────────────────────────────┤
+│  5a-ii. Yahoo trending / ownership data          │
+│     Ownership-change delta for trending (📈)      │
+├──────────────────────────────────────────────────┤
 │  5b. Fetch injury report (ESPN JSON API)         │
-│     Real injury designations + news blurbs       │
+│     Injuries, suspensions + news blurbs          │
+├──────────────────────────────────────────────────┤
+│  5c. Fetch NBA schedule                          │
+│     Remaining games per team this week + future  │
 ├──────────────────────────────────────────────────┤
 │  6. Score, rank, and output recommendations      │
-│     Z-scores × team needs × avail × injury       │
+│     Z × needs × avail × injury × schedule        │
+│     + recency boost + trending boost             │
 ├──────────────────────────────────────────────────┤
 │  7. FAAB bid analysis (optional, --faab-history) │
 │     Fetch league transactions → bid suggestions  │
 ├──────────────────────────────────────────────────┤
 │  8. Transaction submission (optional, --claim)   │
-│     Multi-bid add/drop claims via Yahoo API      │
+│     Multi-bid add/drop with roster impact preview│
+├──────────────────────────────────────────────────┤
+│  S. Streaming mode (optional, --stream)          │
+│     Best pickup with a game TODAY                │
+├──────────────────────────────────────────────────┤
+│  D. League discovery (--list-leagues/--list-teams)│
+│     Show leagues, teams, IDs                     │
 └──────────────────────────────────────────────────┘
 ```
 
-Steps 7 and 8 are optional post-analysis actions. See [FAAB Bid Analysis](faab-analysis.md) and [Transactions](transactions.md) for details.
+Steps 7, 8, S, and D are optional modes. See [FAAB Bid Analysis](faab-analysis.md) and [Transactions](transactions.md) for details.
 
 ## Step 1 — Yahoo Fantasy Connection
 
 Uses the [yfpy](https://github.com/uberfastman/yfpy) library to authenticate with the Yahoo Fantasy Sports API via OAuth2. On first run, a browser window opens for authorization. Subsequent runs use a saved refresh token stored in the `.env` file.
+
+## Step 1b — Auto-Detect League Settings
+
+Immediately after connecting, the tool reads the league's metadata from the Yahoo API and auto-overrides config defaults:
+
+| Setting | Source | Config Override |
+|---------|--------|----------------|
+| Transaction limit | `max_adds` | `WEEKLY_TRANSACTION_LIMIT` |
+| FAAB mode | `waiver_type` / `uses_faab` | `FAAB_ENABLED` |
+| Stat categories | `stat_categories.stats` | Validated against expected 9-cat |
+| Roster positions | `roster_positions` | Reports active/bench/IL slot counts |
+| Team count | `num_teams` | Informational |
+
+The stat category validation maps Yahoo stat IDs (e.g., `5` = FG%, `12` = PTS, `19` = TO) to the expected 9-category set and warns if any are missing or extra. This ensures the tool's z-score model matches your league's actual scoring categories.
 
 ## Step 2 — League Roster Scanning
 
@@ -265,9 +299,35 @@ This is critical because a player like Jaren Jackson Jr. may have an 80%+ GP rat
 
 | Status | Label | Base Multiplier | Meaning |
 |--------|-------|----------------|--------|
-| Out For Season | `OUT-SEASON` | 0.00 | Eliminated from recommendations entirely |
+| Out For Season | `OUT-SEASON` | 0.00 | **Hard exclusion** — removed from recommendations entirely |
+| Suspended | `SUSP` | Dynamic (see below) | Computed from suspension length vs. remaining fantasy games |
 | Out | `OUT` | 0.10 | Near-elimination; still visible for IL stash |
 | Day To Day | `DTD` | 0.90 | Minor penalty; could play any game |
+
+**Hard exclusion:** Players with a multiplier of exactly 0.0 (OUT-SEASON, long suspensions) are completely removed from the recommendation list — they are not just penalized, they are skipped. Additive boosts (recency, trending) cannot rescue a hard-excluded player.
+
+**Near-elimination guard:** Players with a multiplier ≤ 0.05 have their additive boosts (recency, trending) zeroed out to prevent small positive signals from keeping a long-term-absent player on the list.
+
+### Suspension Multiplier (Dynamic)
+
+Suspended players receive a context-aware multiplier based on their team's remaining fantasy-season games rather than a static penalty. The suspension game count is parsed from the ESPN blurb text (e.g., "25-game suspension").
+
+$$
+\text{avail\_frac} = \frac{\max(\text{remaining\_games} - \text{suspension\_games}, 0)}{\text{remaining\_games}}
+$$
+
+| Games Available / Remaining | Multiplier | Meaning |
+|-----------------------------|------------|---------|
+| 0% (misses all remaining games) | 0.00 (excluded) | Season-ending suspension |
+| ≤ 15% | 0.03 | Nearly season-ending |
+| ≤ 35% | 0.10 | Misses most remaining games |
+| ≤ 60% | 0.30 | Misses a significant chunk |
+| ≤ 85% | 0.60 | Moderate miss |
+| > 85% | 0.85 | Minor miss (1-2 games) |
+
+**Example:** A 25-game suspension with 20 remaining fantasy games → 0 games available → ×0.00 (hard exclusion). The same suspension with 80 remaining games → 55 available (69%) → ×0.30.
+
+When schedule data is unavailable, the tool falls back to static thresholds: ≥10 games = 0.0, ≥5 = 0.03, ≥2 = 0.15, 1 = 0.85.
 
 ### Contextual Adjustments
 
@@ -288,16 +348,19 @@ This means two "Out" players can receive very different penalties based on their
 Putting it all together:
 
 $$
-Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{recent} \times M_{injury} \times M_{schedule}
+Adj\_Score = \overbrace{\left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{injury} \times M_{schedule}}^{\text{multiplicative core}} + \overbrace{B_{recency} + B_{trending}}^{\text{additive boosts}}
 $$
 
 Where:
 - $Z\_Total$ = sum of 9 category z-scores (raw talent)
 - $z_w$ = z-score in each of the team's 3 weakest categories (need boost)
-- $M_{avail}$ = season availability multiplier (1.0 / 0.85 / 0.65 / 0.45)
-- $M_{recent}$ = recent activity multiplier (1.0 / 0.75 / 0.30)
-- $M_{injury}$ = injury report multiplier (0.0 to 1.0; 1.0 if not on injury report)
+- $M_{avail}$ = season availability × recent activity multiplier (stacked: e.g. 0.85 × 0.75)
+- $M_{injury}$ = injury/suspension report multiplier (0.0 to 1.0; 1.0 if not on report)
 - $M_{schedule}$ = schedule multiplier based on team games vs league average (see [Schedule Analysis](schedule-analysis.md))
+- $B_{recency}$ = `HOT_PICKUP_RECENCY_WEIGHT` × z_delta (only when positive; 0 otherwise)
+- $B_{trending}$ = `HOT_PICKUP_TRENDING_WEIGHT` × min(Δ%Own / 10, 3.0) (only when 📈 trending)
+
+### Multiplicative Core
 
 All multipliers stack multiplicatively. A player who is "Moderate" season-long, "Inactive" recently, and "Out" on the injury report:
 
@@ -305,4 +368,59 @@ $$
 \text{Combined} = 0.85 \times 0.30 \times 0.10 = 0.0255
 $$
 
+### Additive Boosts
+
+The recency and trending boosts are **additive** — they are applied after the multiplicative core. This means a breakout performer (🔥) or trending player (📈) gets a fixed signal bonus regardless of schedule multiplier.
+
+However, for near-eliminated players ($M_{injury} \leq 0.05$), additive boosts are zeroed out to prevent small positive signals from keeping a long-term-absent player on the list. Players with $M_{injury} = 0.0$ are hard-excluded entirely.
+
+### Hard Exclusion
+
+Players with `OUT-SEASON` status or long suspensions ($M_{injury} = 0.0$) are completely removed from the recommendation list before scoring. They cannot appear in the output regardless of their raw z-score, trending status, or hot-pickup signal.
+
 Players are sorted by `Adj_Score` descending. The top N (default: 15) are displayed as recommendations.
+
+---
+
+## Streaming Mode
+
+Streaming mode (`--stream`) is a specialised analysis for daily add/drop strategies. Instead of recommending the overall best waiver pickups, it focuses on finding the best available player **with a game today**.
+
+### Flow
+
+1. Fetch today's NBA schedule to identify which teams play
+2. Filter the waiver pool to only players on teams with a game today
+3. Analyse your roster to identify the weakest spot (lowest z-score player)
+4. Score streaming candidates using the same need-weighted algorithm (without schedule multiplier, since all candidates have exactly 1 game today)
+5. Show the top picks with a roster impact preview for the #1 recommendation
+
+This is designed for managers who aggressively stream their bottom roster spot to maximise weekly counting stats.
+
+---
+
+## Roster Impact Preview
+
+Before confirming a waiver claim (in `--claim` or `--dry-run` mode) and in streaming mode, a roster impact preview shows the per-category z-score delta:
+
+$$
+\Delta z_c = z_{\text{add},c} - z_{\text{drop},c}
+$$
+
+for each non-punted category $c$. The net z-score change is the sum across all categories:
+
+$$
+\text{net} = \sum_c \Delta z_c
+$$
+
+Deltas ≥ +0.3 are highlighted green (improvement), ≤ −0.3 red (regression). This shows exactly which categories improve or worsen from a swap, so you can make informed decisions.
+
+---
+
+## League & Team Discovery
+
+The discovery commands (`--list-leagues`, `--list-teams`) help you find the correct league and team IDs for your `.env` configuration:
+
+- **`--list-leagues`** queries the Yahoo API for all NBA Fantasy leagues you belong to in the current season and displays their IDs, names, team counts, and scoring types.
+- **`--list-teams`** lists all teams in your configured league with team IDs, manager names, and a marker for your own team.
+
+Both commands run and exit without performing full analysis.

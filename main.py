@@ -87,6 +87,33 @@ Examples:
         default=None,
         help="FAAB bidding strategy: value (bargain), competitive (median), aggressive (ensure win)",
     )
+    parser.add_argument(
+        "--list-leagues",
+        action="store_true",
+        help="Show all Yahoo Fantasy NBA leagues you belong to and exit",
+    )
+    parser.add_argument(
+        "--list-teams",
+        action="store_true",
+        help="Show all teams in your league with IDs and managers, then exit",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Streaming mode: find the best available player with a game today for your weakest roster spot",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Run analysis once and send results via email notification (designed for scheduled/cron use)",
+    )
+    parser.add_argument(
+        "--notify",
+        type=str,
+        choices=["email"],
+        default=None,
+        help="Notification method for --watch mode (default: email)",
+    )
 
     args = parser.parse_args()
 
@@ -107,6 +134,23 @@ Examples:
         print("ERROR: --claim/--dry-run/--faab-history requires Yahoo integration (cannot use --skip-yahoo)")
         sys.exit(1)
 
+    # --stream requires Yahoo
+    if args.stream and args.skip_yahoo:
+        print("ERROR: --stream requires Yahoo integration (cannot use --skip-yahoo)")
+        sys.exit(1)
+
+    # --watch requires Yahoo and email config
+    if args.watch and args.skip_yahoo:
+        print("ERROR: --watch requires Yahoo integration (cannot use --skip-yahoo)")
+        sys.exit(1)
+    if args.watch:
+        from src.notifier import email_configured
+        if not email_configured():
+            print("ERROR: --watch requires email configuration in .env")
+            print("  Set NOTIFY_EMAIL_TO and NOTIFY_SMTP_PASSWORD")
+            print("  See docs/setup-guide.md for Gmail App Password instructions.")
+            sys.exit(1)
+
     # Validate Yahoo credentials if not skipping
     if not args.skip_yahoo:
         if not config.YAHOO_CONSUMER_KEY or config.YAHOO_CONSUMER_KEY == "your_consumer_key_here":
@@ -119,6 +163,81 @@ Examples:
             print()
             print("Or run with --skip-yahoo to see NBA stats rankings without Yahoo.")
             sys.exit(1)
+
+    # ---------------------------------------------------------------
+    # Discovery commands (--list-leagues, --list-teams) — run and exit
+    # ---------------------------------------------------------------
+    if args.list_leagues or args.list_teams:
+        from src.yahoo_fantasy import create_yahoo_query
+        print("\nConnecting to Yahoo Fantasy Sports...")
+        query = create_yahoo_query()
+
+        if args.list_leagues:
+            from src.yahoo_fantasy import list_user_leagues
+            leagues = list_user_leagues(query)
+            if not leagues:
+                print("\n  No NBA fantasy leagues found for this account.")
+            else:
+                print(f"\n  Your NBA Fantasy Leagues ({len(leagues)}):")
+                print(f"  {'ID':<8} {'Name':<35} {'Season':<8} {'Teams':<7} {'Scoring'}")
+                print(f"  {'─'*8} {'─'*35} {'─'*8} {'─'*7} {'─'*15}")
+                for lg in leagues:
+                    print(f"  {lg['league_id']:<8} {lg['name']:<35} {lg['season']:<8} {lg['num_teams']:<7} {lg['scoring_type']}")
+                print(f"\n  Set YAHOO_LEAGUE_ID in .env to use a league.")
+
+        if args.list_teams:
+            from src.yahoo_fantasy import list_league_teams
+            teams = list_league_teams(query)
+            if not teams:
+                print("\n  No teams found in this league.")
+            else:
+                print(f"\n  Teams in League {config.YAHOO_LEAGUE_ID} ({len(teams)}):")
+                print(f"  {'ID':<5} {'Team Name':<30} {'Manager':<20} {'Yours'}")
+                print(f"  {'─'*5} {'─'*30} {'─'*20} {'─'*5}")
+                for t in teams:
+                    marker = " ←" if t["is_my_team"] else ""
+                    print(f"  {t['team_id']:<5} {t['name']:<30} {t['manager']:<20}{marker}")
+                print(f"\n  Set YAHOO_TEAM_ID in .env to your team number.")
+        return
+
+    # ---------------------------------------------------------------
+    # Watch mode (--watch) — run analysis, email results, and exit
+    # ---------------------------------------------------------------
+    if args.watch:
+        from src.notifier import send_email_report
+        print()
+        print("=" * 70)
+        print("  NBA FANTASY ADVISOR - Watch Mode")
+        print(f"  League: {config.YAHOO_LEAGUE_ID} | Team: {config.YAHOO_TEAM_ID}")
+        print("=" * 70)
+        print()
+
+        result = run_waiver_analysis(
+            skip_yahoo=False,
+            return_data=True,
+            compact=False,
+        )
+
+        if result is not None and isinstance(result, tuple) and len(result) >= 2:
+            _query, rec_df = result[0], result[1]
+            schedule_analysis = result[3] if len(result) >= 4 else None
+            if rec_df is not None and not rec_df.empty:
+                top_n = config.TOP_N_RECOMMENDATIONS
+                print(f"\n  Sending email report (top {top_n} recommendations)...")
+                send_email_report(rec_df, schedule_analysis=schedule_analysis, top_n=top_n)
+            else:
+                print("  No recommendations to send.")
+        else:
+            print("  Analysis returned no data — cannot send report.")
+        return
+
+    # ---------------------------------------------------------------
+    # Streaming mode (--stream) — run and exit
+    # ---------------------------------------------------------------
+    if args.stream:
+        from src.waiver_advisor import run_streaming_analysis
+        run_streaming_analysis()
+        return
 
     print()
     print("=" * 70)

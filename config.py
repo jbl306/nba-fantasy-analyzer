@@ -66,8 +66,7 @@ PREMIUM_BID_FLOOR = 15     # Minimum bid to be classified as "premium"
 OUTLIER_IQR_FACTOR = 1.5   # IQR multiplier for outlier detection
 
 # Transaction limits
-# Number of add/drop transactions allowed per fantasy week (Mon-Sun).
-# Resets at the start of each Monday.
+# Default weekly add/drop limit (auto-detected from Yahoo when connected).
 WEEKLY_TRANSACTION_LIMIT = 3
 
 # Schedule analysis settings
@@ -147,3 +146,18 @@ STAT_CATEGORIES = {
 # Output directory for saved data
 OUTPUT_DIR = Path("/mnt/c/Users/joshu/projects/nba-fantasy-advisor/outputs")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Yahoo NBA stat_id → config STAT_CATEGORIES key mapping.
+# Used to validate that your Yahoo league's scoring categories match
+# the 9-cat model this tool expects.  Auto-detected on connection.
+YAHOO_STAT_ID_MAP: dict[int, str] = {
+    5:  "FG_PCT",   # FG%
+    8:  "FT_PCT",   # FT%
+    10: "FG3M",     # 3PTM
+    12: "PTS",      # Points
+    15: "REB",      # Rebounds
+    16: "AST",      # Assists
+    17: "STL",      # Steals
+    18: "BLK",      # Blocks
+    19: "TOV",      # Turnovers
+}

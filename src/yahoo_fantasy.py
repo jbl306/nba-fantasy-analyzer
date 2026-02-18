@@ -91,6 +91,99 @@ def create_yahoo_query() -> YahooFantasySportsQuery:
     return query
 
 
+def list_user_leagues(query: YahooFantasySportsQuery) -> list[dict]:
+    """List all fantasy basketball leagues the user belongs to.
+
+    Useful after first OAuth to discover league and team IDs without
+    digging through Yahoo URLs.
+
+    Returns:
+        List of dicts with league_id, league_key, name, season, num_teams,
+        scoring_type.
+    """
+    leagues: list[dict] = []
+    try:
+        game_info = query.get_current_game_info()
+        game_key = str(game_info.game_id)
+    except Exception as e:
+        print(f"  Error resolving game key: {e}")
+        return leagues
+
+    try:
+        user_leagues = query.get_user_leagues_by_game_key([game_key])
+    except Exception as e:
+        print(f"  Error fetching user leagues: {e}")
+        return leagues
+
+    if not user_leagues:
+        return leagues
+
+    for league_obj in user_leagues:
+        game = league_obj
+        if hasattr(league_obj, "game"):
+            game = league_obj.game
+        league_list = getattr(game, "leagues", None)
+        if not league_list:
+            continue
+        for lg_wrapper in league_list:
+            lg = lg_wrapper.league if hasattr(lg_wrapper, "league") else lg_wrapper
+            league_key = str(getattr(lg, "league_key", ""))
+            lid = league_key.split(".")[-1] if "." in league_key else ""
+            leagues.append({
+                "league_id": lid,
+                "league_key": league_key,
+                "name": str(getattr(lg, "name", "Unknown")),
+                "season": str(getattr(lg, "season", "")),
+                "num_teams": getattr(lg, "num_teams", "?"),
+                "scoring_type": str(getattr(lg, "scoring_type", "?")),
+            })
+
+    return leagues
+
+
+def list_league_teams(query: YahooFantasySportsQuery) -> list[dict]:
+    """List all teams in the current league with their IDs and managers.
+
+    Helps new users find their ``YAHOO_TEAM_ID`` without navigating Yahoo.
+
+    Returns:
+        List of dicts with team_id, name, manager, is_my_team.
+    """
+    teams_out: list[dict] = []
+    try:
+        teams = query.get_league_teams()
+    except Exception as e:
+        print(f"  Error fetching league teams: {e}")
+        return teams_out
+
+    for team_obj in teams:
+        team = team_obj.team if hasattr(team_obj, "team") else team_obj
+        team_id = getattr(team, "team_id", None)
+        name = str(getattr(team, "name", "Unknown"))
+
+        # Extract manager info
+        managers = getattr(team, "managers", None)
+        manager_name = ""
+        if managers:
+            for m_wrapper in managers:
+                mgr = m_wrapper.manager if hasattr(m_wrapper, "manager") else m_wrapper
+                nickname = getattr(mgr, "nickname", "")
+                if nickname:
+                    manager_name = str(nickname)
+                    break
+
+        is_mine = (int(team_id) == config.YAHOO_TEAM_ID) if team_id is not None else False
+
+        teams_out.append({
+            "team_id": int(team_id) if team_id is not None else 0,
+            "name": name,
+            "manager": manager_name,
+            "is_my_team": is_mine,
+        })
+
+    return teams_out
+
+
 def get_league_teams(query: YahooFantasySportsQuery) -> list:
     """Get all teams in the league."""
     return query.get_league_teams()
