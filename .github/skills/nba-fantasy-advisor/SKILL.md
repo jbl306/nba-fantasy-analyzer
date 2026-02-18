@@ -24,8 +24,9 @@ metadata:
 ## Overview
 
 A CLI tool that analyzes NBA player statistics, your Yahoo Fantasy roster, injury
-reports, and the NBA schedule to produce ranked waiver wire recommendations with
-optional FAAB bid suggestions and direct Yahoo transaction submission.
+reports, Yahoo trending/ownership data, and the NBA schedule to produce ranked
+waiver wire recommendations with hot-pickup detection, optional FAAB bid
+suggestions, and direct Yahoo transaction submission.
 
 ## Instructions
 
@@ -64,10 +65,12 @@ This executes the full pipeline:
 3. Identify unowned players and score them against your roster's category needs
 4. Pull real-time injury data from ESPN and apply severity multipliers
 5. Analyze the NBA schedule for games-per-week density bonuses
-6. Output a ranked recommendations table with adjusted scores
+6. Fetch recent game logs and compute hot-pickup z-deltas for breakout detection
+7. Query Yahoo ownership trends to identify trending players being widely added
+8. Output a ranked recommendations table with adjusted scores, hot (🔥) and trending (📈) indicators
 
 Expected output: A formatted table of top waiver wire pickups printed to console
-and saved to `output/waiver_recommendations.csv`.
+and saved to `outputs/waiver_recommendations.csv`.
 
 ### Step 3: FAAB Bid Analysis (Optional)
 
@@ -101,6 +104,7 @@ directly to Yahoo via XML API POST.
 | `--dry-run` | Preview a claim without submitting |
 | `--faab-history` | Analyze league FAAB bid history |
 | `--strategy` | FAAB bid strategy: value / competitive / aggressive |
+| `--compact` | Condensed table: Player, Team, Z_Value, Adj_Score, Injury, Games_Wk, Hot, Trending |
 
 ## Architecture
 
@@ -108,14 +112,15 @@ directly to Yahoo via XML API POST.
 main.py                    # CLI entry point & pipeline orchestration
 config.py                  # All settings & environment config
 src/
-  nba_stats.py             # NBA stats + z-score engine (volume-weighted FG%/FT%)
-  yahoo_fantasy.py         # Yahoo API wrapper (OAuth2, roster scanning)
-  waiver_advisor.py        # Core recommendation engine (need-weighted scoring)
+  nba_stats.py             # NBA stats + z-score engine (volume-weighted FG%/FT%) + hot-pickup z-delta
+  yahoo_fantasy.py         # Yahoo API wrapper (OAuth2, roster scanning, trending players)
+  waiver_advisor.py        # Core recommendation engine (need-weighted + recency/trending boosts)
   injury_news.py           # ESPN injury API integration
   schedule_analyzer.py     # NBA schedule density analysis
   faab_analyzer.py         # FAAB bid history & tier-based suggestions
   league_settings.py       # League rules, FAAB budget tracking
   transactions.py          # Yahoo waiver claim / FAAB bid submission
+  colors.py                # ANSI color utilities for terminal output
 ```
 
 ## Key Technical Details
@@ -148,6 +153,25 @@ src/
   `DROPPABLE_PLAYERS` list when disabled.
 - **Transaction Safety**: IL/IL+ compliance checks block invalid transactions.
   Weekly transaction limit tracked with unique-drop counting.
+- **Color-Coded Output**: ANSI colors for injury status (red=OUT, yellow=DTD,
+  green=Healthy), category assessments, z-scores, and budget status. Respects
+  `NO_COLOR` env var. Windows VT processing enabled automatically.
+- **Compact Display**: `--compact` flag reduces the recommendation table to
+  key columns (Player, Team, Games_Wk, Injury, Z_Value, Adj_Score, Hot, Trending).
+- **Hot-Pickup Detection**: Fetches last N game logs per candidate and computes
+  recent z-scores against league-wide season averages. Players with z_delta ≥ 1.0
+  are flagged as 🔥 Hot. A recency boost (`RECENCY_WEIGHT × z_delta`) is added
+  to Adj_Score for improving players, surfacing breakout performers.
+- **Yahoo Trending Integration**: Queries Yahoo ownership-change data in batches.
+  Players gaining ≥ `HOT_PICKUP_MIN_DELTA` (default: 5%) ownership are flagged
+  as 📈 Trending with an additive score boost. Helps identify players being
+  widely added before they're unavailable.
+- **Expanded Candidate Pool**: When hot-pickup is enabled, the candidate pool
+  is expanded to `TOP_N × 3` to ensure breakout performers ranked lower by
+  season z-score are still evaluated and can surface in recommendations.
+- **Roster-Strength-Aware FAAB**: Bids adjusted based on overall roster
+  strength — weak rosters bid more aggressively, strong rosters bid
+  conservatively. Factor displayed in transaction flow.
 
 ## Troubleshooting
 

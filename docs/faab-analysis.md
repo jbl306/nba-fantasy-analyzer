@@ -19,6 +19,8 @@ The FAAB analyzer solves this problem by:
 5. **Adjusting bids for budget health** — scales bids based on remaining budget vs. ideal weekly spend
 6. **Adjusting bids for schedule value** — scales bids based on the player's team game count in the upcoming week
 
+> **Note:** Hot-pickup detection and Yahoo trending data feed into Adj_Score before FAAB tiering occurs. This means breakout performers (🔥) and trending players (📈) naturally receive higher tier classifications and bid suggestions, since their boosted Adj_Score places them in stronger quality tiers.
+
 ---
 
 ## Quality Tiers
@@ -179,10 +181,10 @@ The factor is clamped to [0.5, 2.0] to prevent extreme scaling:
 
 | Budget Status | Budget Factor | Effect |
 |---------------|---------------|--------|
-| **FLUSH** | ≥ 1.30 | Bids scaled up — you can afford to be aggressive |
-| **HEALTHY** | 0.90 – 1.29 | Bids near normal |
-| **TIGHT** | 0.60 – 0.89 | Bids scaled down — conserve budget |
-| **CRITICAL** | < 0.60 | Bids significantly reduced — survival mode |
+| **FLEXIBLE** | ≥ 1.30 | Bids scaled up — you can afford to be aggressive |
+| **COMFORTABLE** | 0.90 – 1.29 | Bids near normal |
+| **MODERATE** | 0.60 – 0.89 | Bids scaled down — bid selectively |
+| **CONSERVE** | < 0.60 | Bids significantly reduced — only bid on must-haves |
 
 The bid is multiplied by the budget factor, so a $10 base bid with a TIGHT budget (factor 0.75) becomes $8.
 
@@ -203,7 +205,27 @@ This provides a ±15% adjustment per game above or below the league average:
 | 3 | -0.5 below | 0.925 | Bid down ~8% |
 | 2 | -1.5 below | 0.775 | Bid down ~23% |
 
-Players with more games this week provide more stat production opportunity, justifying a higher bid.
+Players with more remaining games this week provide more stat production opportunity, justifying a higher bid.
+
+### Roster-Strength-Aware Bidding
+
+The analyzer also adjusts bids based on your overall roster strength relative to the field. This is computed from the average z-score across your non-punt categories:
+
+$$
+\text{bid\_factor} = 1.0 - 0.15 \times \text{avg\_z}
+$$
+
+Clamped to [0.7, 1.3]:
+
+| Roster Strength | Avg Z | Bid Factor | Effect |
+|----------------|-------|------------|--------|
+| **Strong roster** | ≥ +0.40 | ~0.94 | Bid down ~6% — be selective, you’re competitive |
+| **Solid roster** | +0.10 to +0.39 | ~0.97 | Slight bid reduction |
+| **Average roster** | -0.19 to +0.09 | ~1.00 | Neutral — no adjustment |
+| **Below average** | -0.50 to -0.20 | ~1.04 | Bid up ~4% — need upgrades |
+| **Weak roster** | < -0.50 | ~1.08 | Bid up ~8% — aggressively pursue impact players |
+
+The roster strength label and z-score context are displayed in the transaction flow alongside budget status and bid suggestions.
 
 ### Safety Caps
 
@@ -300,8 +322,9 @@ The system reads your remaining FAAB balance from Yahoo and computes budget heal
 - **Remaining budget** and **total budget** (regular season vs. playoffs)
 - **Weeks remaining** in the current phase
 - **Weekly budget** (remaining ÷ weeks left)
-- **Budget status** (FLUSH / HEALTHY / TIGHT / CRITICAL)
+- **Budget status** (FLEXIBLE / COMFORTABLE / MODERATE / CONSERVE)
 - **Max single bid** (50% of remaining)
+- **Roster strength** (Strong/Solid/Average/Below average/Weak with avg z-score)
 
 ---
 
@@ -335,7 +358,7 @@ src/faab_analyzer.py
 
 ### Output File
 
-FAAB bid history is saved to `output/faab_analysis.csv` with columns: `transaction_id`, `timestamp`, `type`, `faab_bid`, `add_player_name`, `add_player_key`, `drop_player_name`, `drop_player_key`, `team_name`, `team_key`, `status`.
+FAAB bid history is saved to `outputs/faab_analysis.csv` with columns: `transaction_id`, `timestamp`, `type`, `faab_bid`, `add_player_name`, `add_player_key`, `drop_player_name`, `drop_player_key`, `team_name`, `team_key`, `status`.
 
 ---
 

@@ -20,6 +20,16 @@
 | `RECENT_GAMES_WINDOW` | `14` | Days to evaluate recent player form |
 | `PUNT_CATEGORIES` | `[]` | Categories to exclude from scoring |
 
+### Hot Pickup & Trending
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `HOT_PICKUP_ENABLED` | `True` | Enable hot-pickup detection (recent game z-delta + Yahoo trending) |
+| `HOT_PICKUP_RECENT_GAMES` | `3` | Number of recent games to evaluate per candidate |
+| `HOT_PICKUP_RECENCY_WEIGHT` | `0.25` | Additive boost per z_delta point for improving players |
+| `HOT_PICKUP_TRENDING_WEIGHT` | `0.15` | Additive boost for trending players (scaled by ownership delta) |
+| `HOT_PICKUP_MIN_DELTA` | `5` | Minimum %-ownership change to flag a player as Trending |
+
 ### Roster Management
 
 | Setting | Default | Description |
@@ -38,7 +48,7 @@
 | `FAAB_BUDGET_REGULAR_SEASON` | `300` | Starting regular season FAAB budget |
 | `FAAB_BUDGET_PLAYOFFS` | `100` | Playoff FAAB budget after reset |
 | `FAAB_MAX_BID_PERCENT` | `0.50` | Max fraction of budget for one bid |
-| `FAAB_BID_OVERRIDE` | `None` | Override suggested bid with fixed amount |
+| `FAAB_BID_OVERRIDE` | `True` | Prompt to override suggested bid (`False` = auto-accept) |
 
 ### Schedule Analysis
 

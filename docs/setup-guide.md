@@ -130,6 +130,7 @@ python main.py --top 25
 
 ```bash
 python main.py --skip-yahoo --top 30
+python main.py --compact                  # Condensed table output
 ```
 
 ---
@@ -197,6 +198,16 @@ All configuration lives in `config.py` and can be adjusted:
 | `WEEKLY_TRANSACTION_LIMIT` | `3` | Max transactions per week (resets Monday) |
 | `SCHEDULE_WEEKS_AHEAD` | `3` | Number of upcoming weeks to analyze for schedule-based scoring |
 | `SCHEDULE_WEIGHT` | `0.10` | How strongly schedule affects score multiplier (±10% per game delta) |
+
+### Hot Pickup & Trending Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `HOT_PICKUP_ENABLED` | `True` | Enable hot-pickup detection (recent game z-delta analysis + Yahoo trending) |
+| `HOT_PICKUP_RECENT_GAMES` | `3` | Number of recent games to fetch for each candidate |
+| `HOT_PICKUP_RECENCY_WEIGHT` | `0.25` | Additive boost per z_delta point for improving players |
+| `HOT_PICKUP_TRENDING_WEIGHT` | `0.15` | Additive boost for trending players (scaled by ownership delta) |
+| `HOT_PICKUP_MIN_DELTA` | `5` | Minimum %-ownership change to flag a player as 📈 Trending |
 | `SCHEDULE_WEEK_DECAY` | `0.50` | Exponential decay factor for future week weighting |
 
 See [FAAB Bid Analysis](faab-analysis.md) for a detailed explanation of strategies and how bid suggestions work.

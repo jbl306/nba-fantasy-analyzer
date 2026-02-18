@@ -71,6 +71,7 @@ python main.py --claim                     # Submit a waiver claim interactively
 python main.py --dry-run                   # Preview a claim without submitting
 python main.py --faab-history              # Analyze league FAAB bid history
 python main.py --strategy aggressive       # FAAB bidding strategy (value|competitive|aggressive)
+python main.py --compact                   # Compact table: Player, Team, Z, Score, Injury, Schedule
 python main.py --skip-yahoo --top 30
 ```
 
@@ -82,8 +83,12 @@ python main.py --skip-yahoo --top 30
 4. **Schedule Analysis**: Pulls the NBA schedule to weight players with more upcoming games higher (week-decay model)
 5. **Roster Analysis**: Connects to Yahoo Fantasy to analyze your team's category strengths/weaknesses
 6. **Need-Weighted Scoring**: Boosts waiver recommendations for players who fill your weakest categories, with optional punt-category mode
-7. **FAAB Bidding**: Analyzes league bid history (IQR outlier detection) and suggests bids using league-relative tiering
-8. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, and schedule data
+7. **Hot Pickup Detection**: Fetches recent game logs (last 3 games) and computes z-score deltas to identify breakout performers. Players trending upward get a recency boost in scoring.
+8. **Trending Players**: Pulls Yahoo ownership-change data (percent-owned delta) to flag players being widely added across leagues. Trending players get an additional scoring boost.
+9. **FAAB Bidding**: Analyzes league bid history (IQR outlier detection) and suggests bids using league-relative tiering, adjusted for roster strength
+10. **Color-Coded Output**: ANSI color-coded terminal output — green (Healthy/STRONG), yellow (DTD/Below Avg), red (OUT/WEAK) — with `NO_COLOR` support
+11. **Compact Mode**: `--compact` flag shows a condensed table (Player, Team, Z_Value, Adj_Score, Injury, Games_Wk)
+12. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, hot-pickup indicators, and schedule data
 
 ## Project Structure
 
@@ -96,14 +101,15 @@ nba-fantasy-advisor/
 ├── .env                    # Your credentials (git-ignored)
 ├── src/
 │   ├── __init__.py
-│   ├── nba_stats.py        # NBA stats scraping (nba_api)
-│   ├── yahoo_fantasy.py    # Yahoo Fantasy integration (yfpy) + auth retry
-│   ├── waiver_advisor.py   # Recommendation engine
+│   ├── nba_stats.py        # NBA stats scraping (nba_api) + hot-pickup z-delta engine
+│   ├── yahoo_fantasy.py    # Yahoo Fantasy integration (yfpy) + auth retry + trending players
+│   ├── waiver_advisor.py   # Recommendation engine (need-weighted + recency/trending boosts)
 │   ├── injury_news.py      # Injury report via ESPN JSON API
 │   ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
 │   ├── faab_analyzer.py    # FAAB bid history & suggested bids
 │   ├── league_settings.py  # Yahoo league settings, FAAB balance, budget tracking
-│   └── transactions.py     # Waiver claims, FAAB bids & IL moves
+│   ├── transactions.py     # Waiver claims, FAAB bids & IL moves
+│   └── colors.py           # ANSI color utilities for terminal output
 └── docs/
     ├── methodology.md      # Scoring model & algorithm details
     ├── setup-guide.md      # Installation & configuration
@@ -136,6 +142,7 @@ nba-fantasy-advisor/
 | Injury report | [ESPN](https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries) | Public JSON API (no auth required) |
 | NBA schedule | [nba_api](https://github.com/swar/nba_api) | `LeagueGameFinder` / schedule endpoints |
 | Fantasy rosters | [Yahoo Fantasy API](https://developer.yahoo.com/fantasysports/) | OAuth 2.0 via yfpy |
+| Ownership trends | [Yahoo Fantasy API](https://developer.yahoo.com/fantasysports/) | `PercentOwned` delta via league player batch queries |
 
 ## Dependencies
 
@@ -155,3 +162,9 @@ nba-fantasy-advisor/
 - **IQR outlier detection**: Premium/returning-star bids are separated from standard bids using IQR analysis, preventing them from skewing tier bid statistics.
 - **Auto-detect droppable players**: When `AUTO_DETECT_DROPPABLE = True`, the tool ranks your roster by z-score and auto-identifies the bottom N players as drop candidates — no manual config edits needed when your roster changes. Use `UNDDROPPABLE_PLAYERS` to protect stashed players.
 - **Smart transaction counting**: Multiple bids against the same drop player count as one transaction slot (unique drops, not total bids).
+- **Roster-strength-aware FAAB**: Bids are adjusted based on your overall roster strength — weak rosters bid more aggressively, strong rosters bid conservatively.
+- **Color-coded terminal output**: ANSI colors for injury status (red=OUT, yellow=DTD, green=Healthy), category assessments, z-scores, and FAAB budget status. Respects `NO_COLOR` env var and non-TTY output. Windows VT processing enabled automatically.
+- **Compact display mode**: `--compact` flag reduces the recommendation table to key columns for quick scanning, including Hot (🔥) and Trending (📈) indicators.
+- **Hot-pickup detection**: Fetches last N game logs per candidate and z-scores recent performance against season averages. Players with z_delta ≥ 1.0 are flagged as 🔥 Hot. Recency boost = `RECENCY_WEIGHT × z_delta` (additive to Adj_Score).
+- **Yahoo trending integration**: Queries Yahoo ownership-change data in batches. Players gaining ≥ 5% ownership are flagged as 📈 Trending. Trending boost = `TRENDING_WEIGHT × min(delta/10, 3.0)` (additive to Adj_Score).
+- **Expanded candidate pool**: When hot-pickup is enabled, the candidate pool is expanded to `TOP_N × 3` to ensure breakout performers ranked lower by season z-score are still evaluated.

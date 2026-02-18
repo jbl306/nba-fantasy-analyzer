@@ -197,7 +197,8 @@ def extract_player_details(player_obj) -> dict:
     """Extract key details from a yfpy player object.
 
     Returns:
-        Dict with 'name', 'team', 'position', 'player_key', 'status'.
+        Dict with 'name', 'team', 'position', 'player_key', 'status',
+        'percent_owned', 'percent_owned_delta'.
     """
     player = player_obj
     if hasattr(player_obj, "player"):
@@ -211,6 +212,7 @@ def extract_player_details(player_obj) -> dict:
         "status": "",
         "selected_position": "",
         "percent_owned": 0.0,
+        "percent_owned_delta": 0.0,
     }
 
     if hasattr(player, "editorial_team_abbr"):
@@ -239,5 +241,94 @@ def extract_player_details(player_obj) -> dict:
             details["percent_owned"] = float(po.value or 0)
         elif isinstance(po, (int, float)):
             details["percent_owned"] = float(po)
+        # Capture ownership delta (week-over-week change)
+        if hasattr(po, "delta"):
+            try:
+                details["percent_owned_delta"] = float(po.delta or 0)
+            except (ValueError, TypeError):
+                pass
 
     return details
+
+
+def fetch_trending_players(
+    query: YahooFantasySportsQuery,
+    player_names: list[str],
+    owned_names: set[str] | None = None,
+) -> dict[str, dict]:
+    """Fetch percent-owned and ownership delta for waiver candidates.
+
+    Queries Yahoo's ``get_player_percent_owned_by_week`` for each candidate
+    that has a discoverable player_key.  This reveals which free agents are
+    being added across all Yahoo leagues — a strong "grab before it's too
+    late" signal.
+
+    Strategy:
+      1. Fetch a batch of league players from Yahoo (free agents first).
+      2. Match them by normalized name to our candidate list.
+      3. Extract percent_owned value + delta.
+
+    Args:
+        query: Authenticated YFPY query instance.
+        player_names: List of player names to look up trending data for.
+        owned_names: Set of owned player names (to skip).
+
+    Returns:
+        Dict mapping normalized player name → {
+            percent_owned: float,
+            percent_owned_delta: float,
+            is_trending: bool,
+        }
+    """
+    import config
+
+    trending: dict[str, dict] = {}
+    target_names = {normalize_name(n) for n in player_names}
+    if owned_names:
+        target_names -= owned_names
+
+    if not target_names:
+        return trending
+
+    # Fetch league players in batches to find our candidates
+    # Yahoo returns ~25 players per call; fetch enough to cover free agents
+    print("  Fetching Yahoo ownership trends for waiver candidates...")
+    seen_names: set[str] = set()
+    batch_size = 25
+    max_fetched = 250  # Don't over-fetch — just need the top trending FAs
+
+    for start in range(0, max_fetched, batch_size):
+        if not target_names - seen_names:
+            break  # Found all candidates
+        try:
+            players = query.get_league_players(
+                player_count_limit=batch_size,
+                player_count_start=start,
+            )
+            if not players:
+                break
+
+            for p_obj in players:
+                details = extract_player_details(p_obj)
+                norm = normalize_name(details["name"])
+                seen_names.add(norm)
+
+                if norm in target_names:
+                    pct = details.get("percent_owned", 0)
+                    delta = details.get("percent_owned_delta", 0)
+                    is_trending = delta >= config.HOT_PICKUP_MIN_DELTA
+                    trending[norm] = {
+                        "percent_owned": pct,
+                        "percent_owned_delta": delta,
+                        "is_trending": is_trending,
+                    }
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"  Warning: trending data batch at {start} failed: {e}")
+            break
+
+    found = len(trending)
+    trending_count = sum(1 for v in trending.values() if v["is_trending"])
+    print(f"  Found ownership data for {found} candidates, {trending_count} trending\n")
+
+    return trending

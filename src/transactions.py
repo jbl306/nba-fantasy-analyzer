@@ -667,6 +667,7 @@ def run_transaction_flow(
     budget_status: dict | None = None,
     schedule_analysis: dict | None = None,
     nba_stats=None,
+    roster_strength: dict | None = None,
 ) -> None:
     """Interactive flow to select and submit add/drop transactions.
 
@@ -688,6 +689,7 @@ def run_transaction_flow(
         budget_status: Pre-computed budget health dict.
         schedule_analysis: Pre-computed schedule analysis dict.
         nba_stats: Full NBA stats DataFrame (for schedule comparison).
+        roster_strength: Pre-computed roster strength dict for bid adjustments.
     """
     print()
     print("=" * 70)
@@ -737,10 +739,34 @@ def run_transaction_flow(
     # Budget status display
     # ---------------------------------------------------------------
     if budget_status and config.FAAB_ENABLED:
-        print(f"\n  FAAB Budget: ${budget_status['remaining_budget']} remaining"
-              f" | ${budget_status['weekly_budget']}/wk"
-              f" | Status: {budget_status['status']}"
-              f" | Max bid: ${budget_status['max_single_bid']}")
+        from src.colors import colorize_budget_status
+        colored_status = colorize_budget_status(budget_status['status'])
+        budget_line = (
+            f"\n  FAAB Budget: ${budget_status['remaining_budget']} remaining"
+            f" | ${budget_status['weekly_budget']}/wk"
+            f" | Status: {colored_status}"
+            f" | Max bid: ${budget_status['max_single_bid']}"
+        )
+        rank = budget_status.get("league_rank")
+        size = budget_status.get("league_size")
+        if rank and size:
+            budget_line += f" | Rank: {rank}/{size}"
+        print(budget_line)
+
+    if roster_strength:
+        from src.colors import green, yellow, red
+        label = roster_strength["label"]
+        avg_z = roster_strength["avg_z"]
+        if avg_z >= 0.1:
+            colored_label = green(label)
+        elif avg_z <= -0.2:
+            colored_label = red(label)
+        else:
+            colored_label = yellow(label)
+        print(f"  Roster Strength: {colored_label}"
+              f" (avg z: {avg_z:+.2f},"
+              f" {roster_strength['strong_cats']} strong /"
+              f" {roster_strength['weak_cats']} weak cats)")
 
     # Build the working droppable list
     # When AUTO_DETECT_DROPPABLE is on, rank roster by z-score and pick
@@ -830,7 +856,8 @@ def run_transaction_flow(
             ]
             if not match.empty:
                 z_val = match.iloc[0]["Z_TOTAL"]
-                z_str = f"  Z: {z_val:+.2f}"
+                from src.colors import colorize_z_score
+                z_str = f"  Z: {colorize_z_score(z_val)}"
         print(f"  {i}. {name:<30} {key_str}{z_str}")
 
     # Show top recommendations (with bid suggestions if FAAB)
@@ -867,8 +894,10 @@ def run_transaction_flow(
         score = row.get("Adj_Score", 0)
         injury = row.get("Injury", "-")
         games_wk = row.get("Games_Wk", "-")
-        injury_str = f" [{injury}]" if injury != "-" else ""
+        from src.colors import colorize_injury, colorize_z_score
+        injury_str = f" [{colorize_injury(injury)}]" if injury != "-" else ""
         games_str = f"  {games_wk}G" if games_wk != "-" else ""
+        score_str = colorize_z_score(float(score), f"{score:>6.2f}")
 
         # Show suggested bid if FAAB
         bid_hint = ""
@@ -885,13 +914,14 @@ def run_transaction_flow(
                 budget_status=budget_status,
                 schedule_games=sched_games,
                 avg_games=avg_games,
+                roster_strength=roster_strength,
             )
             bid_hint = f"  ~${sug['suggested_bid']}"
             premium_range = sug.get("premium_range")
             if premium_range and float(score) >= 6.0:
                 bid_hint += f" (premium: ${premium_range['min']}-${premium_range['max']})"
 
-        print(f"  {i+1:>2}. {player:<28} {team:<5} Score: {score:>6.2f}{games_str}{injury_str}{bid_hint}")
+        print(f"  {i+1:>2}. {player:<28} {team:<5} Score: {score_str}{games_str}{injury_str}{bid_hint}")
 
     # ---------------------------------------------------------------
     # Multi-bid loop: submit multiple claims in one session
@@ -972,6 +1002,7 @@ def run_transaction_flow(
                         budget_status=budget_status,
                         schedule_games=sched_games,
                         avg_games=avg_games,
+                        roster_strength=roster_strength,
                     )
                     suggested = sug["suggested_bid"]
                     print(f"  Suggested bid: ${suggested} ({sug['reason']})")
@@ -980,8 +1011,15 @@ def run_transaction_flow(
                         print(f"  Premium range: ${premium_range['min']}-${premium_range['max']}"
                               f" ({premium_range['count']} returning-star bids in history)")
                     if budget_status:
+                        from src.colors import colorize_budget_status
                         print(f"  Budget: ${budget_status['remaining_budget']} remaining"
-                              f" | Max bid: ${budget_status['max_single_bid']}")
+                              f" | Max bid: ${budget_status['max_single_bid']}"
+                              f" | {colorize_budget_status(budget_status['status'])}")
+                    if roster_strength:
+                        print(f"  Roster: {roster_strength['label']}"
+                              f" (avg z: {roster_strength['avg_z']:+.2f},"
+                              f" {roster_strength['strong_cats']} strong /"
+                              f" {roster_strength['weak_cats']} weak cats)")
 
                 bid_input = ""
                 if config.FAAB_BID_OVERRIDE:

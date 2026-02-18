@@ -100,6 +100,15 @@ INACTIVE_DAYS_THRESHOLD = 10
 # How many top waiver candidates to fetch detailed game logs for
 DETAILED_LOG_LIMIT = 10
 
+# Hot-pickup / trending detection
+# Weights recent performance and ownership trends to catch breakout players
+# before rivals claim them.
+HOT_PICKUP_ENABLED = True          # Enable trending/hot-pickup boost
+HOT_PICKUP_RECENT_GAMES = 3       # Number of recent games to evaluate
+HOT_PICKUP_RECENCY_WEIGHT = 0.25  # Weight for recent-game z-score boost
+HOT_PICKUP_TRENDING_WEIGHT = 0.15 # Weight for ownership-trend (% owned delta) boost
+HOT_PICKUP_MIN_DELTA = 5          # Min % owned increase to trigger trending flag
+
 # Injury report settings
 # Source: Basketball-Reference injury report
 INJURY_REPORT_ENABLED = True  # set to False to skip injury scraping
@@ -136,5 +145,5 @@ STAT_CATEGORIES = {
 }
 
 # Output directory for saved data
-OUTPUT_DIR = PROJECT_DIR / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR = Path("/mnt/c/Users/joshu/projects/nba-fantasy-advisor/outputs")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

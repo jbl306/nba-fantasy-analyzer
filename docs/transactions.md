@@ -342,4 +342,6 @@ src/transactions.py
 - **yfpy is read-only:** yfpy itself has no write methods. This module works around that by directly accessing yfpy's internal OAuth session for POST requests.
 - **Waiver processing:** Submitting a claim doesn't guarantee the pickup. Yahoo processes waivers on its normal schedule (typically overnight). The claim enters the waiver queue.
 - **Multiple bids, same drop player:** You can drop the same player for different add targets. Yahoo processes claims in priority order — if the first claim wins, the rest are automatically voided. The tool correctly counts unique drop players rather than total bids when tracking your weekly transaction limit.
-- **Budget tracking:** The claim flow reads your remaining FAAB balance from Yahoo, displays budget status (FLUSH/HEALTHY/TIGHT/CRITICAL), and enforces bid caps based on remaining budget.
+- **Budget tracking:** The claim flow reads your remaining FAAB balance from Yahoo, displays budget status (FLEXIBLE/COMFORTABLE/MODERATE/CONSERVE), and enforces bid caps based on remaining budget.
+- **Roster-strength-aware bids:** FAAB bid suggestions factor in your roster’s overall strength (computed from average category z-scores). Weak rosters bid more aggressively; strong rosters bid conservatively. The roster strength label and z-score breakdown are displayed alongside budget status in the transaction flow.
+- **Color-coded output:** Injury statuses, z-scores, budget status, and roster strength are color-coded in the terminal output (green/yellow/red). Respects `NO_COLOR` env var.

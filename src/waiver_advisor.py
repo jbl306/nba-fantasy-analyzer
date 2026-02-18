@@ -12,6 +12,10 @@ Flow:
   6. Rank available players with need-weighted scoring
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 import pandas as pd
 from tabulate import tabulate
 
@@ -207,12 +211,70 @@ def identify_team_needs(roster_df: pd.DataFrame) -> dict[str, float]:
     return dict(sorted(cat_averages.items(), key=lambda x: x[1]))
 
 
+def compute_roster_strength(team_needs: dict[str, float]) -> dict[str, Any]:
+    """Compute an overall roster strength summary from category z-scores.
+
+    Used by FAAB bid logic to adjust aggressiveness based on how strong
+    your roster is relative to a neutral baseline.
+
+    Returns:
+        Dict with:
+          - ``avg_z``: Mean z-score across non-punt categories.
+          - ``strong_cats``: Count of categories with z >= 0.3.
+          - ``weak_cats``: Count of categories with z <= -0.3.
+          - ``label``: Human-readable strength label.
+          - ``bid_factor``: Multiplier for FAAB bids (>1 = bid less, <1 = bid more).
+    """
+    if not team_needs:
+        return {
+            "avg_z": 0.0, "strong_cats": 0, "weak_cats": 0,
+            "label": "Unknown", "bid_factor": 1.0,
+        }
+    avg_z = sum(team_needs.values()) / len(team_needs)
+    strong = sum(1 for z in team_needs.values() if z >= 0.3)
+    weak = sum(1 for z in team_needs.values() if z <= -0.3)
+
+    # Map average z-score to a bid adjustment factor.
+    # Strong roster → conservative (factor > 1 reduces urgency, so we
+    # actually want to *lower* bids when strong → factor < 1 pushes
+    # bids down).  Weak roster → aggressive (factor > 1 pushes bids up).
+    #
+    # We invert: bid_factor = 1.0 - 0.15 * avg_z (clamped 0.7–1.3)
+    # avg_z = +0.5 (strong) → factor = 0.925 (bid ~7.5% less)
+    # avg_z = -0.5 (weak)   → factor = 1.075 (bid ~7.5% more)
+    bid_factor = 1.0 - 0.15 * avg_z
+    bid_factor = max(0.7, min(1.3, bid_factor))
+
+    if avg_z >= 0.4:
+        label = "Strong roster"
+    elif avg_z >= 0.1:
+        label = "Solid roster"
+    elif avg_z >= -0.2:
+        label = "Average roster"
+    elif avg_z >= -0.5:
+        label = "Below average"
+    else:
+        label = "Weak roster"
+
+    return {
+        "avg_z": round(avg_z, 2),
+        "strong_cats": strong,
+        "weak_cats": weak,
+        "label": label,
+        "bid_factor": round(bid_factor, 3),
+    }
+
+
 def format_team_analysis(roster_df: pd.DataFrame, team_needs: dict) -> str:
-    """Format team analysis as a readable string."""
+    """Format team analysis as a readable string with color-coded assessments."""
+    from src.colors import (
+        cyan, green, yellow, red, bold, colorize_assessment, colorize_z_score,
+    )
+
     lines = []
-    lines.append("=" * 70)
-    lines.append("YOUR TEAM CATEGORY ANALYSIS")
-    lines.append("=" * 70)
+    lines.append(cyan("=" * 70))
+    lines.append(cyan("YOUR TEAM CATEGORY ANALYSIS"))
+    lines.append(cyan("=" * 70))
 
     # Show punt info if configured
     if config.PUNT_CATEGORIES:
@@ -232,16 +294,18 @@ def format_team_analysis(roster_df: pd.DataFrame, team_needs: dict) -> str:
             assessment = "Below Avg"
         else:
             assessment = "WEAK"
-        lines.append(f"{cat_name:<12} {z_avg:>12.2f} {assessment:>15}")
+        z_str = colorize_z_score(z_avg, f"{z_avg:>12.2f}")
+        colored_assessment = colorize_assessment(assessment)
+        lines.append(f"{cat_name:<12} {z_str} {colored_assessment:>15}")
 
     # Identify punt candidates and strengths
     strengths = [c for c, z in team_needs.items() if z >= 0.3]
     weaknesses = [c for c, z in team_needs.items() if z <= -0.3]
 
     if strengths:
-        lines.append(f"\nStrengths: {', '.join(strengths)}")
+        lines.append(f"\n{green('Strengths')}: {', '.join(strengths)}")
     if weaknesses:
-        lines.append(f"Weaknesses: {', '.join(weaknesses)}")
+        lines.append(f"{red('Weaknesses')}: {', '.join(weaknesses)}")
         lines.append(f"  -> Target waiver pickups strong in: {', '.join(weaknesses)}")
 
     return "\n".join(lines)
@@ -255,6 +319,8 @@ def score_available_players(
     schedule_game_counts: dict[str, int] | None = None,
     avg_games_per_week: float = 3.5,
     schedule_analysis: dict | None = None,
+    hot_pickup_scores: dict[int, dict] | None = None,
+    trending_data: dict[str, dict] | None = None,
 ) -> pd.DataFrame:
     """Score and rank available players directly from the NBA stats DataFrame.
 
@@ -266,6 +332,8 @@ def score_available_players(
       - Recent activity penalty for players not playing lately
       - Injury report penalty from Basketball-Reference data
       - Schedule multiplier for upcoming game count (more games = higher value)
+      - **Hot-pickup boost** for recent breakout performance (last N games)
+      - **Trending boost** for players with spiking ownership across Yahoo
 
     When *schedule_analysis* is provided (multi-week), the schedule multiplier
     uses week-decay weighting (current week counts more than future weeks).
@@ -279,6 +347,10 @@ def score_available_players(
         avg_games_per_week: League avg games/week for schedule multiplier baseline.
         schedule_analysis: Optional full schedule analysis dict from
             :func:`build_schedule_analysis`.  Enables multi-week decay weighting.
+        hot_pickup_scores: Optional dict from compute_hot_pickup_scores mapping
+            player_id → {recent_z_total, z_delta, is_hot}.
+        trending_data: Optional dict from fetch_trending_players mapping
+            normalized_name → {percent_owned, percent_owned_delta, is_trending}.
 
     Returns:
         DataFrame of ranked waiver recommendations.
@@ -394,8 +466,58 @@ def score_available_players(
         else:
             rec["Games_Wk"] = "-"
 
-        # Apply availability discount, injury penalty, AND schedule multiplier
-        adj_score = need_score * avail_mult * injury_mult * schedule_mult
+        # ---------------------------------------------------------------
+        # Hot-pickup boost: recent breakout performance
+        # ---------------------------------------------------------------
+        recency_boost = 0.0
+        rec["Recent_Z"] = "-"
+        rec["Z_Delta"] = "-"
+        rec["Hot"] = ""
+
+        if hot_pickup_scores and player_id and int(player_id) in hot_pickup_scores:
+            hp = hot_pickup_scores[int(player_id)]
+            rec["Recent_Z"] = hp["recent_z_total"]
+            z_delta = hp["z_delta"]
+            rec["Z_Delta"] = z_delta
+            # Boost = weight × z_delta (only positive — don't penalize slumps
+            # beyond what the season stats already reflect)
+            if z_delta > 0:
+                recency_boost = config.HOT_PICKUP_RECENCY_WEIGHT * z_delta
+            if hp.get("is_hot"):
+                rec["Hot"] = "🔥"
+
+        # ---------------------------------------------------------------
+        # Trending boost: ownership spike across Yahoo leagues
+        # ---------------------------------------------------------------
+        trending_boost = 0.0
+        rec["%Own"] = "-"
+        rec["Δ%Own"] = "-"
+        rec["Trending"] = ""
+
+        if trending_data:
+            norm_name = normalize_name(player_name)
+            trend_info = trending_data.get(norm_name)
+            if trend_info:
+                pct = trend_info["percent_owned"]
+                delta = trend_info["percent_owned_delta"]
+                rec["%Own"] = f"{pct:.0f}%"
+                rec["Δ%Own"] = f"{delta:+.0f}%" if delta else "0%"
+                if trend_info["is_trending"]:
+                    rec["Trending"] = "📈"
+                    # Trending boost scales with the delta magnitude
+                    # A +20% spike is a stronger signal than +5%
+                    trending_boost = (
+                        config.HOT_PICKUP_TRENDING_WEIGHT
+                        * min(delta / 10.0, 3.0)  # cap at ~30% delta equivalent
+                    )
+
+        # Apply availability discount, injury penalty, schedule multiplier,
+        # PLUS additive hot-pickup and trending boosts
+        adj_score = (
+            need_score * avail_mult * injury_mult * schedule_mult
+            + recency_boost
+            + trending_boost
+        )
         rec["Adj_Score"] = round(adj_score, 2)
 
         recommendations.append(rec)
@@ -411,27 +533,79 @@ def score_available_players(
     return rec_df
 
 
-def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> str:
-    """Format waiver recommendations as a readable table."""
+def format_recommendations(
+    rec_df: pd.DataFrame,
+    top_n: int | None = None,
+    compact: bool = False,
+) -> str:
+    """Format waiver recommendations as a readable table.
+
+    Args:
+        rec_df: Ranked recommendations DataFrame.
+        top_n: Max rows to display.
+        compact: If True, show only Player, Team, Z_Value, Adj_Score,
+                 Injury, and Games_Wk columns.
+    """
+    from src.colors import (
+        cyan, bold, colorize_injury, colorize_health, colorize_z_score,
+    )
+
     if top_n is None:
         top_n = config.TOP_N_RECOMMENDATIONS
 
     df_display = rec_df.head(top_n).copy()
 
     # Select display columns
-    display_cols = ["Player", "Team", "GP", "MIN", "Games_Wk", "Avail%", "Health", "Injury", "Recent", "G/14d"]
-    for cat_info in config.STAT_CATEGORIES.values():
-        if cat_info["name"] in df_display.columns:
-            display_cols.append(cat_info["name"])
-    display_cols.extend(["Z_Value", "Adj_Score"])
+    if compact:
+        display_cols = ["Player", "Team", "Games_Wk", "Injury", "Z_Value", "Adj_Score"]
+        # Add hot-pickup columns if data is present
+        if "Hot" in df_display.columns:
+            display_cols.insert(-1, "Hot")
+        if "Trending" in df_display.columns:
+            display_cols.insert(-1, "Trending")
+    else:
+        display_cols = ["Player", "Team", "GP", "MIN", "Games_Wk", "Avail%", "Health", "Injury", "Recent", "G/14d"]
+        for cat_info in config.STAT_CATEGORIES.values():
+            if cat_info["name"] in df_display.columns:
+                display_cols.append(cat_info["name"])
+        display_cols.extend(["Z_Value"])
+        # Add hot-pickup columns before Adj_Score
+        for col in ["Z_Delta", "Hot", "%Own", "Δ%Own", "Trending"]:
+            if col in df_display.columns:
+                display_cols.append(col)
+        display_cols.append("Adj_Score")
 
     # Only keep columns that exist
     display_cols = [c for c in display_cols if c in df_display.columns]
 
+    # Colorize cell values before passing to tabulate
+    if "Injury" in df_display.columns:
+        df_display["Injury"] = df_display["Injury"].apply(colorize_injury)
+    if "Health" in df_display.columns:
+        df_display["Health"] = df_display["Health"].apply(colorize_health)
+    if "Z_Value" in df_display.columns:
+        df_display["Z_Value"] = df_display["Z_Value"].apply(
+            lambda v: colorize_z_score(float(v)) if v != "-" else v
+        )
+    if "Z_Delta" in df_display.columns:
+        from src.colors import green, red
+        df_display["Z_Delta"] = df_display["Z_Delta"].apply(
+            lambda v: green(f"{v:+.1f}") if isinstance(v, (int, float)) and v >= 1.0
+            else red(f"{v:+.1f}") if isinstance(v, (int, float)) and v <= -1.0
+            else (f"{v:+.1f}" if isinstance(v, (int, float)) else v)
+        )
+    if "Adj_Score" in df_display.columns:
+        df_display["Adj_Score"] = df_display["Adj_Score"].apply(
+            lambda v: colorize_z_score(float(v)) if v != "-" else v
+        )
+
     lines = []
-    lines.append("=" * 100)
-    lines.append("TOP WAIVER WIRE RECOMMENDATIONS")
-    lines.append("=" * 100)
+    title = "TOP WAIVER WIRE RECOMMENDATIONS"
+    if compact:
+        title += " (compact)"
+    lines.append(cyan("=" * 100))
+    lines.append(cyan(title))
+    lines.append(cyan("=" * 100))
     lines.append("")
     lines.append(
         tabulate(
@@ -444,28 +618,39 @@ def format_recommendations(rec_df: pd.DataFrame, top_n: int | None = None) -> st
     )
     lines.append("")
     lines.append("Z_Value   = Raw 9-cat z-score (higher = better all-around)")
-    lines.append("Adj_Score = Z_Value weighted by team needs, availability, injury, AND schedule")
-    lines.append("Games_Wk  = Games this upcoming week (more games = more stat production)")
-    lines.append("Avail%    = Games Played / Team Games (season durability)")
-    lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)")
-    lines.append("Injury    = OUT-SEASON | OUT | DTD (Day-To-Day) | - (not on injury report)")
-    lines.append("Recent    = Active (played <3d ago) | Questionable (3-10d) | Inactive (>10d)")
+    lines.append("Adj_Score = Z_Value weighted by team needs, availability, injury, schedule, + hot-pickup boost")
+    lines.append("Games_Wk  = Remaining games this week (games already played are excluded)")
+    if not compact:
+        lines.append("Z_Delta   = Recent-game z-score minus season z-score (breakout signal)")
+        lines.append("🔥 Hot     = Performing 1+ z-score above season average in last 3 games")
+        lines.append("📈 Trending = Ownership spiking across Yahoo leagues (early pickup signal)")
+        lines.append("Avail%    = Games Played / Team Games (season durability)")
+        lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)")
+        lines.append("Injury    = OUT-SEASON | OUT | DTD (Day-To-Day) | - (not on injury report)")
+        lines.append("Recent    = Active (played <3d ago) | Questionable (3-10d) | Inactive (>10d)")
 
     # Show injury notes for any recommended player with an injury
-    if "Injury_Note" in df_display.columns:
-        injured_players = df_display[df_display["Injury_Note"] != "-"]
+    if "Injury_Note" in rec_df.head(top_n).columns:
+        injured_players = rec_df.head(top_n)[
+            rec_df.head(top_n)["Injury_Note"] != "-"
+        ]
         if not injured_players.empty:
             lines.append("")
-            lines.append("=" * 100)
-            lines.append("INJURY REPORT NOTES (source: ESPN)")
-            lines.append("=" * 100)
+            lines.append(cyan("=" * 100))
+            lines.append(cyan("INJURY REPORT NOTES (source: ESPN)"))
+            lines.append(cyan("=" * 100))
             for _, row in injured_players.iterrows():
-                lines.append(f"  {row['Player']:<25} {row['Injury_Note']}")
+                note = row['Injury_Note']
+                lines.append(f"  {row['Player']:<25} {note}")
 
     return "\n".join(lines)
 
 
-def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
+def run_waiver_analysis(
+    skip_yahoo: bool = False,
+    return_data: bool = False,
+    compact: bool = False,
+):
     """Run the full waiver wire analysis pipeline.
 
     The flow is Yahoo-first:
@@ -531,7 +716,7 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
             avg_games_per_week=avg_games_per_week,
             schedule_analysis=schedule_analysis,
         )
-        print(format_recommendations(recommendations))
+        print(format_recommendations(recommendations, compact=compact))
         return
 
     # ---------------------------------------------------------------
@@ -604,8 +789,16 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
     # ---------------------------------------------------------------
     # Sort available players by raw Z_TOTAL to find top candidates
     available_stats = available_stats.sort_values("Z_TOTAL", ascending=False)
+
+    # Expand candidate pool when hot-pickup analysis is enabled so we
+    # don't miss breakout players who sit just outside the top 10 by
+    # season z-score but are surging in recent games.
+    candidate_limit = config.DETAILED_LOG_LIMIT
+    if config.HOT_PICKUP_ENABLED:
+        candidate_limit = max(candidate_limit, config.TOP_N_RECOMMENDATIONS * 3)
+
     top_candidate_ids = (
-        available_stats.head(config.DETAILED_LOG_LIMIT)["PLAYER_ID"]
+        available_stats.head(candidate_limit)["PLAYER_ID"]
         .dropna()
         .astype(int)
         .tolist()
@@ -618,6 +811,33 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
         active_count = sum(1 for v in recent_activity.values() if v.get("recent_flag") == "Active")
         inactive_count = sum(1 for v in recent_activity.values() if v.get("is_inactive"))
         print(f"  {active_count} active, {inactive_count} inactive/injured\n")
+
+    # ---------------------------------------------------------------
+    # STEP 5a: Hot-pickup analysis (recent game breakout detection)
+    # ---------------------------------------------------------------
+    hot_pickup_scores = None
+    if config.HOT_PICKUP_ENABLED and top_candidate_ids:
+        try:
+            from src.nba_stats import compute_recent_game_stats, compute_hot_pickup_scores
+            print(f"Fetching recent game stats for hot-pickup analysis ({config.HOT_PICKUP_RECENT_GAMES} games)...")
+            recent_game_stats = compute_recent_game_stats(top_candidate_ids)
+            hot_pickup_scores = compute_hot_pickup_scores(recent_game_stats, nba_stats)
+            hot_count = sum(1 for v in hot_pickup_scores.values() if v.get("is_hot"))
+            print(f"  {len(recent_game_stats)} players evaluated, {hot_count} breaking out 🔥\n")
+        except Exception as e:
+            print(f"  Warning: hot-pickup analysis failed: {e}\n")
+
+    # ---------------------------------------------------------------
+    # STEP 5a-ii: Yahoo trending/ownership data
+    # ---------------------------------------------------------------
+    trending_data = None
+    if config.HOT_PICKUP_ENABLED:
+        try:
+            from src.yahoo_fantasy import fetch_trending_players
+            candidate_names = available_stats.head(candidate_limit)["PLAYER_NAME"].tolist()
+            trending_data = fetch_trending_players(query, candidate_names, owned_names)
+        except Exception as e:
+            print(f"  Warning: trending data fetch failed: {e}\n")
 
     # ---------------------------------------------------------------
     # STEP 5b: Fetch injury report from Basketball-Reference
@@ -657,14 +877,16 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
     # ---------------------------------------------------------------
     # STEP 6: Rank available players by need-weighted, schedule-adjusted score
     # ---------------------------------------------------------------
-    print("Ranking available players (need + availability + injury + schedule adjusted)...")
+    print("Ranking available players (need + availability + injury + schedule + hot-pickup adjusted)...")
     recommendations = score_available_players(
         available_stats, team_needs, recent_activity, injury_lookup,
         schedule_game_counts=schedule_game_counts,
         avg_games_per_week=avg_games_per_week,
         schedule_analysis=schedule_analysis,
+        hot_pickup_scores=hot_pickup_scores,
+        trending_data=trending_data,
     )
-    print(format_recommendations(recommendations))
+    print(format_recommendations(recommendations, compact=compact))
 
     # ---------------------------------------------------------------
     # STEP 6b: Print schedule comparison report

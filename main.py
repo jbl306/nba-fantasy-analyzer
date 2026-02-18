@@ -76,6 +76,11 @@ Examples:
         help="Analyze league FAAB bid history and show suggested bids",
     )
     parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Compact display: show only Player, Team, Z_Value, Adj_Score, Injury, Games_Wk",
+    )
+    parser.add_argument(
         "--strategy",
         type=str,
         choices=["value", "competitive", "aggressive"],
@@ -125,7 +130,11 @@ Examples:
 
     # Run analysis — returns (query, rec_df, nba_stats, schedule_analysis) when claim/faab mode is requested
     need_data = args.claim or args.faab_history
-    result = run_waiver_analysis(skip_yahoo=args.skip_yahoo, return_data=need_data)
+    result = run_waiver_analysis(
+        skip_yahoo=args.skip_yahoo,
+        return_data=need_data,
+        compact=args.compact,
+    )
 
     # Unpack the expanded return tuple
     query = None
@@ -146,18 +155,31 @@ Examples:
     if query is not None and config.FAAB_ENABLED:
         try:
             from src.league_settings import (
-                fetch_league_settings, get_faab_balance, compute_budget_status,
+                fetch_league_settings, get_faab_balance,
+                get_all_faab_balances, compute_budget_status,
             )
             settings = fetch_league_settings(query)
             faab_balance = get_faab_balance(query)
             if faab_balance is None:
                 # Estimate from FAAB history if Yahoo doesn't expose the balance
                 faab_balance = config.FAAB_BUDGET_REGULAR_SEASON
+
+            # Fetch league-wide FAAB balances for relative ranking
+            league_balances: list[int] | None = None
+            try:
+                all_balances = get_all_faab_balances(query)
+                if all_balances:
+                    league_balances = [b["faab_balance"] for b in all_balances]
+            except Exception as e:
+                print(f"  Warning: could not fetch league FAAB balances: {e}")
+
             budget_status = compute_budget_status(
                 remaining_budget=faab_balance,
                 current_week=settings.get("current_week"),
                 end_week=settings.get("end_week"),
                 playoff_start_week=settings.get("playoff_start_week"),
+                start_week=settings.get("start_week"),
+                league_balances=league_balances,
             )
         except Exception as e:
             print(f"  Warning: budget computation failed: {e}")
@@ -165,6 +187,21 @@ Examples:
     if schedule_analysis and schedule_analysis.get("weeks"):
         schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
         avg_games = schedule_analysis.get("avg_games_per_week", 3.5)
+
+    # Compute roster strength for FAAB bid adjustments
+    roster_strength = None
+    if rec_df is not None and nba_stats is not None:
+        try:
+            from src.waiver_advisor import (
+                analyze_roster, identify_team_needs, compute_roster_strength,
+            )
+            from src.yahoo_fantasy import get_my_team_roster
+            my_roster = get_my_team_roster(query)
+            roster_df = analyze_roster(my_roster, nba_stats)
+            team_needs = identify_team_needs(roster_df)
+            roster_strength = compute_roster_strength(team_needs)
+        except Exception as e:
+            print(f"  Warning: roster strength computation failed: {e}")
 
     # FAAB history analysis
     faab_analysis = None
@@ -175,6 +212,7 @@ Examples:
             budget_status=budget_status,
             schedule_game_counts=schedule_game_counts,
             avg_games=avg_games,
+            roster_strength=roster_strength,
         )
 
     # If claim mode, launch the transaction flow
@@ -186,6 +224,7 @@ Examples:
             budget_status=budget_status,
             schedule_analysis=schedule_analysis,
             nba_stats=nba_stats,
+            roster_strength=roster_strength,
         )
 
 
