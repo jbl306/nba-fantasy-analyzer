@@ -241,7 +241,7 @@ All configuration lives in `config.py` and can be adjusted:
 | `--skip-yahoo` | Skip Yahoo API; use NBA stats only |
 | `--top N` | Show N recommendations (default: 15) |
 | `--compact` | Condensed table output |
-| `--claim` | Enter interactive claim submission flow |
+| `--claim` | Enter interactive claim submission flow (falls back to manual instructions if write access unavailable) |
 | `--dry-run` | Preview claim XML without submitting |
 | `--faab-history` | Fetch FAAB bid history for smart suggestions |
 | `--strategy S` | FAAB strategy: `value`, `competitive`, `aggressive` |

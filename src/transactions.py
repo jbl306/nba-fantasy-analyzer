@@ -468,6 +468,84 @@ def build_roster_move_xml(player_key: str, new_position: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Scope / write-access detection
+# ---------------------------------------------------------------------------
+
+_SCOPE_ERROR_SNIPPET = "do not have the appropriate OAuth scope"
+
+
+def _is_scope_error(response_text: str) -> bool:
+    """Return True if the Yahoo response indicates a missing write scope."""
+    return _SCOPE_ERROR_SNIPPET.lower() in response_text.lower()
+
+
+def _print_manual_instructions(
+    claims: list[dict],
+    *,
+    il_violations: list[dict] | None = None,
+) -> None:
+    """Print step-by-step Yahoo Fantasy UI instructions for queued claims.
+
+    Called as a fallback when the Yahoo app lacks write (Read/Write) scope
+    so the user can execute the recommended moves manually.
+
+    Args:
+        claims: List of dicts with keys 'add_name', 'drop_name', 'faab_bid'.
+        il_violations: Optional IL violations that need resolving first.
+    """
+    print()
+    print("=" * 70)
+    print("  MANUAL ACTION PLAN")
+    print("  Your Yahoo app only has Read permission — write access is required")
+    print("  to submit transactions via the API.  Follow the steps below in")
+    print("  the Yahoo Fantasy Basketball UI to execute these moves manually.")
+    print("=" * 70)
+
+    step = 0
+
+    # IL resolution instructions
+    if il_violations:
+        print("\n  ── IL/IL+ Compliance ──")
+        for v in il_violations:
+            step += 1
+            print(f"\n  Step {step}: Resolve {v['player']} ({v['slot']} slot)")
+            print(f"    Status: {v['status']} — not eligible for {v['slot']}")
+            print(f"    → Go to your roster, click {v['player']}, choose")
+            print(f"      \"Move to Bench\" or \"Drop\" to clear the violation.")
+
+    # Add/drop instructions
+    if claims:
+        print("\n  ── Waiver Claims ──")
+        for claim in claims:
+            step += 1
+            add = claim["add_name"]
+            drop = claim["drop_name"]
+            bid = claim.get("faab_bid")
+            print(f"\n  Step {step}: ADD {add}  /  DROP {drop}")
+            print(f"    1. Go to Players → search for \"{add}\"")
+            print(f"    2. Click \"+\" (Add) next to {add}")
+            if bid is not None:
+                print(f"    3. Set FAAB bid to ${bid}")
+                print(f"    4. Select \"{drop}\" as the player to drop")
+                print(f"    5. Confirm the claim")
+            else:
+                print(f"    3. Select \"{drop}\" as the player to drop")
+                print(f"    4. Confirm the claim")
+
+    if not claims and not il_violations:
+        print("\n  No actions to take.")
+    else:
+        print(f"\n  {'─'*50}")
+        print(f"  Total steps: {step}")
+        if any(c.get("faab_bid") is not None for c in claims):
+            total_faab = sum(c["faab_bid"] for c in claims if c.get("faab_bid") is not None)
+            print(f"  Total FAAB committed: ${total_faab}")
+        print(f"\n  Tip: Once Yahoo grants your app Read/Write access, re-run")
+        print(f"  with --claim to submit transactions directly via the API.")
+    print("=" * 70)
+
+
+# ---------------------------------------------------------------------------
 # Transaction submission
 # ---------------------------------------------------------------------------
 
@@ -489,9 +567,16 @@ def submit_transaction(query, xml_payload: str) -> dict[str, Any]:
     headers = {"Content-Type": "application/xml"}
 
     try:
-        # Access yfpy's internal OAuth session (yahoo-oauth)
-        oauth_session = query._yahoo_fantasy_api
-        response = oauth_session.session.post(url, data=xml_payload, headers=headers)
+        # Ensure the OAuth token is fresh before posting
+        if not query.oauth.token_is_valid():
+            query.oauth.refresh_access_token()
+
+        response = query.oauth.session.post(url, data=xml_payload, headers=headers)
+
+        # Retry once on 401 after re-authenticating
+        if response.status_code == 401:
+            query._authenticate()
+            response = query.oauth.session.post(url, data=xml_payload, headers=headers)
 
         if response.status_code in (200, 201):
             return {
@@ -501,38 +586,19 @@ def submit_transaction(query, xml_payload: str) -> dict[str, Any]:
                 "response_text": response.text[:500],
             }
         else:
-            return {
+            result = {
                 "success": False,
                 "message": f"Yahoo API returned HTTP {response.status_code}",
                 "status_code": response.status_code,
                 "response_text": response.text[:1000],
             }
-
-    except AttributeError:
-        # yfpy internal structure may vary — try alternative access
-        try:
-            oauth_session = query._yahoo_fantasy_api
-            # Attempt using the requests session directly
-            response = oauth_session.session.post(url, data=xml_payload, headers=headers)
-            if response.status_code in (200, 201):
-                return {
-                    "success": True,
-                    "message": "Transaction submitted successfully!",
-                    "status_code": response.status_code,
-                    "response_text": response.text[:500],
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Yahoo API returned HTTP {response.status_code}",
-                    "status_code": response.status_code,
-                    "response_text": response.text[:1000],
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Could not access yfpy OAuth session: {e}",
-            }
+            if response.status_code == 401 and _is_scope_error(response.text):
+                result["scope_error"] = True
+                result["message"] = (
+                    "Yahoo app lacks write permission (Read/Write scope). "
+                    "Manual instructions will be printed below."
+                )
+            return result
 
     except Exception as e:
         return {
@@ -561,8 +627,16 @@ def submit_roster_move(query, player_key: str, new_position: str) -> dict[str, A
     headers = {"Content-Type": "application/xml"}
 
     try:
-        oauth_session = query._yahoo_fantasy_api
-        response = oauth_session.session.put(url, data=xml_payload, headers=headers)
+        # Ensure the OAuth token is fresh before posting
+        if not query.oauth.token_is_valid():
+            query.oauth.refresh_access_token()
+
+        response = query.oauth.session.put(url, data=xml_payload, headers=headers)
+
+        # Retry once on 401 after re-authenticating
+        if response.status_code == 401:
+            query._authenticate()
+            response = query.oauth.session.put(url, data=xml_payload, headers=headers)
 
         if response.status_code in (200, 201):
             return {
@@ -571,12 +645,19 @@ def submit_roster_move(query, player_key: str, new_position: str) -> dict[str, A
                 "status_code": response.status_code,
             }
         else:
-            return {
+            result = {
                 "success": False,
                 "message": f"Yahoo API returned HTTP {response.status_code}",
                 "status_code": response.status_code,
                 "response_text": response.text[:1000],
             }
+            if response.status_code == 401 and _is_scope_error(response.text):
+                result["scope_error"] = True
+                result["message"] = (
+                    "Yahoo app lacks write permission (Read/Write scope). "
+                    "Manual instructions will be printed below."
+                )
+            return result
     except Exception as e:
         return {
             "success": False,
@@ -936,6 +1017,7 @@ def run_transaction_flow(
 
     # Check IL/IL+ roster compliance
     print("\nChecking IL/IL+ roster compliance...")
+    _pending_il_violations: list[dict] = []  # unresolved violations for manual instructions
     il_violations = check_il_compliance(query)
     if il_violations:
         print()
@@ -989,28 +1071,30 @@ def run_transaction_flow(
             strategies=il_strategies,
         )
         if not success:
-            print("\n  ✗ IL resolution failed. Cannot proceed with transactions.")
-            return
+            print("\n  ✗ IL resolution failed. Cannot proceed with API transactions.")
+            print("  You can still queue claims — manual instructions will be shown.")
+            # Mark IL violations as unresolved so manual instructions include them
+            _pending_il_violations = il_violations
+        else:
+            # Remove consumed regular players from the droppable list
+            for name in regular_consumed:
+                if name in droppable:
+                    droppable.remove(name)
 
-        # Remove consumed regular players from the droppable list
-        for name in regular_consumed:
-            if name in droppable:
-                droppable.remove(name)
+            print(f"\n  ✓ IL/IL+ compliance resolved")
+            if il_dropped_names:
+                print(f"    Dropped IL players: {', '.join(il_dropped_names)}")
+            if regular_consumed:
+                print(f"    Dropped regular players: {', '.join(regular_consumed)}")
 
-        print(f"\n  ✓ IL/IL+ compliance resolved")
-        if il_dropped_names:
-            print(f"    Dropped IL players: {', '.join(il_dropped_names)}")
-        if regular_consumed:
-            print(f"    Dropped regular players: {', '.join(regular_consumed)}")
-
-        if not droppable:
-            print("\n  \u26a0  All droppable players were used for IL resolution.")
-            print("  No players left to drop for waiver bids.")
-            if _auto_mode:
-                print(f"  Increase AUTO_DROPPABLE_COUNT (currently {config.AUTO_DROPPABLE_COUNT}) in config.py.")
-            else:
-                print("  Add more players to DROPPABLE_PLAYERS in config.py.")
-            return
+            if not droppable:
+                print("\n  \u26a0  All droppable players were used for IL resolution.")
+                print("  No players left to drop for waiver bids.")
+                if _auto_mode:
+                    print(f"  Increase AUTO_DROPPABLE_COUNT (currently {config.AUTO_DROPPABLE_COUNT}) in config.py.")
+                else:
+                    print("  Add more players to DROPPABLE_PLAYERS in config.py.")
+                return
     else:
         print("  \u2713 IL/IL+ slots are compliant")
 
@@ -1277,6 +1361,7 @@ def run_transaction_flow(
 
     # Submit each claim
     results = []
+    scope_blocked = False
     for i, claim in enumerate(submitted_claims, 1):
         print(f"\n  [{i}/{len(submitted_claims)}] Processing...")
         result = submit_add_drop(
@@ -1291,10 +1376,22 @@ def run_transaction_flow(
 
         if result["success"]:
             print(f"  ✓ {result['message']}")
+        elif result.get("scope_error"):
+            # Write access unavailable — fall back to manual instructions
+            print(f"  ⚠  {result['message']}")
+            scope_blocked = True
+            break
         else:
             print(f"  ✗ {result['message']}")
             if "response_text" in result:
                 print(f"    Details: {result['response_text'][:200]}")
+
+    if scope_blocked:
+        # Print manual instructions for ALL queued claims
+        _print_manual_instructions(
+            submitted_claims, il_violations=_pending_il_violations
+        )
+        return
 
     # Summary
     successes = sum(1 for r in results if r["success"])

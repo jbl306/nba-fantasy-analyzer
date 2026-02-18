@@ -13,9 +13,9 @@ load_dotenv(ENV_FILE)
 # Yahoo Fantasy Sports settings
 YAHOO_CONSUMER_KEY = os.environ.get("YAHOO_CONSUMER_KEY", "")
 YAHOO_CONSUMER_SECRET = os.environ.get("YAHOO_CONSUMER_SECRET", "")
-YAHOO_LEAGUE_ID = os.environ.get("YAHOO_LEAGUE_ID", "94443")
-YAHOO_TEAM_ID = int(os.environ.get("YAHOO_TEAM_ID", "9"))
-YAHOO_GAME_CODE = os.environ.get("YAHOO_GAME_CODE", "nba")
+YAHOO_LEAGUE_ID = os.environ.get("YAHOO_LEAGUE_ID") or "94443"
+YAHOO_TEAM_ID = int(os.environ.get("YAHOO_TEAM_ID") or "9")
+YAHOO_GAME_CODE = os.environ.get("YAHOO_GAME_CODE") or "nba"
 
 # Roster management settings
 # AUTO_DETECT_DROPPABLE: When True, automatically identify the lowest-value

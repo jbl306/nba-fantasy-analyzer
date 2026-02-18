@@ -38,6 +38,10 @@ The flow supports **multiple bids per session** — you can queue several add/dr
 ├─────────────────────────────────────┤
 │  8. Resolve keys & submit XML       │
 │     POST each claim to Yahoo API    │
+│     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+│     If write scope unavailable:     │
+│     Print MANUAL ACTION PLAN with   │
+│     step-by-step Yahoo UI guide     │
 └─────────────────────────────────────┘
 ```
 
@@ -345,6 +349,7 @@ Several safeguards prevent accidental transactions:
 | "Could not find X on your roster" | Drop player name doesn't match any roster player | Check spelling in `DROPPABLE_PLAYERS` or `UNDDROPPABLE_PLAYERS`; names must match Yahoo's format |
 | "Could not find player key for X" | Add player not found in Yahoo's player pool | Verify the player name matches Yahoo's listing |
 | HTTP 401 | OAuth token expired or invalid | Delete `token.json` in project root and re-authenticate |
+| HTTP 401 (scope) | Yahoo app lacks Read/Write permission | See [Manual Fallback](#manual-fallback-read-only-apps) below |
 | HTTP 403 | Insufficient API permissions | Verify your Yahoo Developer App has Fantasy Sports checked |
 | HTTP 400 | Invalid transaction (player on waivers, roster full, etc.) | Check the response body for Yahoo's specific error message |
 
@@ -365,9 +370,12 @@ src/transactions.py
 │   ├── build_add_only_xml()             # Add-only payload
 │   ├── build_drop_only_xml()            # Drop-only payload (IL resolution)
 │   └── build_roster_move_xml()          # Roster position change (IL → BN)
+├── Scope / write-access detection
+│   ├── _is_scope_error()                # Detect missing write scope in Yahoo response
+│   └── _print_manual_instructions()     # Print step-by-step Yahoo UI action plan
 ├── API submission
-│   ├── submit_transaction()             # POST via yfpy OAuth
-│   └── submit_roster_move()             # PUT via yfpy OAuth
+│   ├── submit_transaction()             # POST via yfpy OAuth (tags scope errors)
+│   └── submit_roster_move()             # PUT via yfpy OAuth (tags scope errors)
 ├── High-level flow
 │   ├── submit_add_drop()                # Resolve + build + submit
 │   ├── compute_roster_impact()          # Per-category z-delta for add/drop swap
@@ -387,9 +395,59 @@ src/transactions.py
     └── get_team_key()
 ```
 
+## Manual Fallback (Read-Only Apps)
+
+Yahoo's Developer Console currently only exposes a **Read** permission toggle for Fantasy Sports — the **Read/Write** option documented in Yahoo's API guide is not available for new apps. If your app lacks write scope, all POST/PUT requests return HTTP 401 with:
+
+> *"You do not have the appropriate OAuth scope permissions to perform this action."*
+
+When this happens, the transaction flow **automatically detects the scope error** on the first submission attempt and prints a **Manual Action Plan** instead of failing silently. The plan includes:
+
+- **IL/IL+ resolution steps** (if any violations exist)
+- **Each queued add/drop claim** with exact player names and FAAB bid amounts
+- **Step-by-step Yahoo Fantasy UI instructions** for executing each move
+- **Total FAAB commitment** summary
+
+Example output:
+
+```
+======================================================================
+  MANUAL ACTION PLAN
+  Your Yahoo app only has Read permission — write access is required
+  to submit transactions via the API.  Follow the steps below in
+  the Yahoo Fantasy Basketball UI to execute these moves manually.
+======================================================================
+
+  ── IL/IL+ Compliance ──
+
+  Step 1: Resolve Kristaps Porzingis (IL slot)
+    Status: Healthy — not eligible for IL
+    → Go to your roster, click Kristaps Porzingis, choose
+      "Move to Bench" or "Drop" to clear the violation.
+
+  ── Waiver Claims ──
+
+  Step 2: ADD Jalen Green  /  DROP Sandro Mamukelashvili
+    1. Go to Players → search for "Jalen Green"
+    2. Click "+" (Add) next to Jalen Green
+    3. Set FAAB bid to $5
+    4. Select "Sandro Mamukelashvili" as the player to drop
+    5. Confirm the claim
+
+  ──────────────────────────────────────────────────────
+  Total steps: 2
+  Total FAAB committed: $5
+
+  Tip: Once Yahoo grants your app Read/Write access, re-run
+  with --claim to submit transactions directly via the API.
+======================================================================
+```
+
+The analysis, FAAB suggestions, roster impact previews, and claim queueing all work normally — only the final API submission step is replaced with manual instructions. Once Yahoo grants Read/Write scope, no code changes are needed; `--claim` will automatically submit via the API.
+
 ## Limitations
 
-- **Read vs Write scope:** Yahoo's Fantasy Sports Developer App settings show only a "Read" toggle. Despite the label, the Fantasy Sports OAuth scope covers both read and write operations as long as you are the team manager.
+- **Read vs Write scope:** Yahoo's Developer Console currently only shows a "Read" toggle for Fantasy Sports. The tool detects this and falls back to printing manual instructions (see [Manual Fallback](#manual-fallback-read-only-apps) above). If/when Yahoo grants your app Read/Write access, API submission works automatically.
 - **yfpy is read-only:** yfpy itself has no write methods. This module works around that by directly accessing yfpy's internal OAuth session for POST requests.
 - **Waiver processing:** Submitting a claim doesn't guarantee the pickup. Yahoo processes waivers on its normal schedule (typically overnight). The claim enters the waiver queue.
 - **Multiple bids, same drop player:** You can drop the same player for different add targets. Yahoo processes claims in priority order — if the first claim wins, the rest are automatically voided. The tool correctly counts unique drop players rather than total bids when tracking your weekly transaction limit.
