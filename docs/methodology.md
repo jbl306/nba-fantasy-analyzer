@@ -160,17 +160,17 @@ For turnovers, the z-score is **inverted** (multiplied by -1) since fewer turnov
 Raw shooting percentages are misleading in H2H because a player's contribution to your team's FG% or FT% depends on both **accuracy** and **attempt volume**. In H2H matchups, your team's FG% is calculated as:
 
 $$
-\text{Team FG}\% = \frac{\sum \text{FGM}}{\sum \text{FGA}}
+\text{Team FG} = \frac{\sum \text{FGM}}{\sum \text{FGA}}
 $$
 
 A player shooting .650 on 2 FGA/game barely moves the needle, while a player shooting .520 on 16 FGA/game dominates the denominator. To capture this, FG% and FT% use **impact-based z-scores**:
 
 $$
-\textit{impact}_i = \text{FGA}_i \times (\text{FG}\%_i - \overline{\text{FG}\%})
+\textit{impact}_i = \text{FGA}_i \times (\text{FG}_i - \overline{\text{FG}})
 $$
 
 $$
-z_{\text{FG}\%} = \frac{\textit{impact}_i - \mu_{\textit{impact}}}{\sigma_{\textit{impact}}}
+z_{\text{FG}} = \frac{\textit{impact}_i - \mu_{\textit{impact}}}{\sigma_{\textit{impact}}}
 $$
 
 The same approach applies to FT% using FTA as the volume weight. This ensures that high-volume efficient shooters are properly rewarded and low-volume outliers are not overvalued.
