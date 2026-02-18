@@ -20,7 +20,7 @@ The recommendation engine runs a six-step pipeline, with optional FAAB analysis 
 │  4. Filter to available players only             │
 │     Remove all owned players from the stats pool │
 ├──────────────────────────────────────────────────┤
-│  5a. Check recent game activity (top 50)         │
+│  5a. Check recent game activity (top 10)         │
 │     Game logs to detect injuries / inactivity    │
 ├──────────────────────────────────────────────────┤
 │  5b. Fetch injury report (ESPN JSON API)         │
@@ -62,7 +62,7 @@ Cross-references the NBA stats pool against the owned player name set from Step 
 
 ## Step 5 — Recent Activity Check
 
-For the top 50 waiver candidates (by raw z-score), the tool fetches individual game logs from `nba_api` to determine:
+For the top 10 waiver candidates (by raw z-score), the tool fetches individual game logs from `nba_api` to determine:
 
 - **Last game date** — when the player last appeared in an NBA game
 - **Days since last game** — how long they've been absent
@@ -225,7 +225,7 @@ $$
 
 ### Recent Activity (Last 10 Days)
 
-Fetched from individual game logs for the top 50 candidates:
+Fetched from individual game logs for the top 10 candidates:
 
 | Flag | Days Since Last Game | Additional Multiplier |
 |------|---------------------|----------------------|

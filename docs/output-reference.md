@@ -111,7 +111,7 @@ Fetched from ESPN's public NBA injury API:
 | Value | Meaning | Base Score Multiplier |
 |-------|---------|----------------------|
 | `OUT-SEASON` | Confirmed out for the remainder of the season | ×0.00 (removed) |
-| `OUT` | Currently out, timeline varies | ×0.05 to ×0.40 (contextual) |
+| `OUT` | Currently out, timeline varies | ×0.10 to ×0.40 (contextual) |
 | `DTD` | Day-to-day, could play any game | ×0.90 to ×0.95 |
 | `-` | Not on the injury report | ×1.00 (no penalty) |
 

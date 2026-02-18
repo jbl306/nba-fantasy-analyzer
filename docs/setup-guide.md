@@ -44,6 +44,8 @@ YAHOO_TEAM_ID=your_team_number
 YAHOO_GAME_CODE=nba
 ```
 
+> **Note:** You do **not** need to specify a `YAHOO_GAME_ID`. The tool auto-resolves the current season's game ID via the Yahoo API on each run, so it never goes stale across seasons.
+
 ### Finding Your League ID
 
 1. Go to your Yahoo Fantasy Basketball league page
@@ -165,14 +167,15 @@ All configuration lives in `config.py` and can be adjusted:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `TOP_N_RECOMMENDATIONS` | 15 | Default number of recommendations |
-| `DETAILED_LOG_LIMIT` | 50 | Number of candidates to fetch game logs for |
+| `DETAILED_LOG_LIMIT` | 10 | Number of candidates to fetch game logs for |
 
 ### FAAB Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `FAAB_ENABLED` | `False` | Set to `True` if your league uses FAAB bidding for waivers |
+| `FAAB_ENABLED` | `True` | Set to `True` if your league uses FAAB bidding for waivers |
 | `DEFAULT_FAAB_BID` | `1` | Fallback bid amount when no historical data is available |
+| `FAAB_BID_OVERRIDE` | `True` | Prompt to override suggested FAAB bid amount (`False` = auto-accept suggested bid) |
 | `FAAB_STRATEGY` | `"competitive"` | Default bid strategy: `"value"`, `"competitive"`, or `"aggressive"` |
 | `FAAB_BUDGET_REGULAR_SEASON` | `300` | Total FAAB budget for the regular season |
 | `FAAB_BUDGET_PLAYOFFS` | `100` | FAAB budget after playoff reset |
@@ -183,8 +186,9 @@ All configuration lives in `config.py` and can be adjusted:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `WEEKLY_TRANSACTION_LIMIT` | `3` | Max transactions per week (resets Monday) |
-| `SCHEDULE_WEEKS_AHEAD` | `2` | Number of upcoming weeks to analyze for schedule-based scoring |
+| `SCHEDULE_WEEKS_AHEAD` | `3` | Number of upcoming weeks to analyze for schedule-based scoring |
 | `SCHEDULE_WEIGHT` | `0.10` | How strongly schedule affects score multiplier (±10% per game delta) |
+| `SCHEDULE_WEEK_DECAY` | `0.50` | Exponential decay factor for future week weighting |
 
 See [FAAB Bid Analysis](faab-analysis.md) for a detailed explanation of strategies and how bid suggestions work.
 See [Schedule Analysis](schedule-analysis.md) for how schedule data is used in scoring and FAAB bids.
@@ -205,6 +209,14 @@ pip install -r requirements.txt
 ### OAuth token expired
 
 Delete the saved token file and re-run to re-authenticate:
+
+```bash
+python main.py
+```
+
+### "You must be logged in to view this league"
+
+This is a known yfpy bug — it refreshes the OAuth token on a 401 but then continues processing the original failed response. The tool includes a retry patch that re-authenticates with back-off (up to 3 retries). If you still see this error persistently, delete the `.env` token fields and re-authenticate:
 
 ```bash
 python main.py

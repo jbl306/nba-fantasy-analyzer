@@ -210,7 +210,7 @@ All other abbreviations match between Yahoo and NBA.com.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `SCHEDULE_WEEKS_AHEAD` | `2` | Number of upcoming weeks to analyze |
+| `SCHEDULE_WEEKS_AHEAD` | `3` | Number of upcoming weeks to analyze |
 | `SCHEDULE_WEIGHT` | `0.10` | How strongly schedule affects the score multiplier (±10% per game delta) |
 | `SCHEDULE_WEEK_DECAY` | `0.50` | Exponential decay factor for future weeks (1.0 = equal weight, 0.0 = current week only) |
 

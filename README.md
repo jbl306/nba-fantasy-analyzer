@@ -2,6 +2,8 @@
 
 Nightly waiver wire recommendation engine for Yahoo Fantasy Basketball (9-category H2H leagues).
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Combines **nba_api** (real NBA stats) with **yfpy** (Yahoo Fantasy Sports API) to:
 - Scrape current season NBA player stats
 - Compute 9-category z-scores (FG%, FT%, 3PM, PTS, REB, AST, STL, BLK, TO)
@@ -76,7 +78,7 @@ python main.py --skip-yahoo --top 30
 
 1. **Fetch Stats**: Pulls per-game stats for all NBA players via nba_api (volume-weighted FG%/FT%)
 2. **Z-Score Ranking**: Computes z-scores across all 9 categories to create a single value metric
-3. **Injury Report**: Fetches real-time injury data from ESPN's public JSON API — penalizes injured players (Out For Season → 0.0 multiplier, Out → 0.05, Day-to-Day → partial)
+3. **Injury Report**: Fetches real-time injury data from ESPN's public JSON API — penalizes injured players (Out For Season → 0.0 multiplier, Out → 0.10, Day-to-Day → partial)
 4. **Schedule Analysis**: Pulls the NBA schedule to weight players with more upcoming games higher (week-decay model)
 5. **Roster Analysis**: Connects to Yahoo Fantasy to analyze your team's category strengths/weaknesses
 6. **Need-Weighted Scoring**: Boosts waiver recommendations for players who fill your weakest categories, with optional punt-category mode
@@ -92,16 +94,24 @@ nba-fantasy-advisor/
 ├── requirements.txt
 ├── .env.template           # Yahoo API credentials template
 ├── .env                    # Your credentials (git-ignored)
-└── src/
-    ├── __init__.py
-    ├── nba_stats.py        # NBA stats scraping (nba_api)
-    ├── yahoo_fantasy.py    # Yahoo Fantasy integration (yfpy)
-    ├── waiver_advisor.py   # Recommendation engine
-    ├── injury_news.py      # Injury report via ESPN JSON API
-    ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
-    ├── faab_analyzer.py    # FAAB bid history & suggested bids
-    ├── league_settings.py  # Yahoo league settings & roster rules
-    └── transactions.py     # Waiver claims & IL moves
+├── src/
+│   ├── __init__.py
+│   ├── nba_stats.py        # NBA stats scraping (nba_api)
+│   ├── yahoo_fantasy.py    # Yahoo Fantasy integration (yfpy) + auth retry
+│   ├── waiver_advisor.py   # Recommendation engine
+│   ├── injury_news.py      # Injury report via ESPN JSON API
+│   ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
+│   ├── faab_analyzer.py    # FAAB bid history & suggested bids
+│   ├── league_settings.py  # Yahoo league settings, FAAB balance, budget tracking
+│   └── transactions.py     # Waiver claims, FAAB bids & IL moves
+└── docs/
+    ├── methodology.md      # Scoring model & algorithm details
+    ├── setup-guide.md      # Installation & configuration
+    ├── output-reference.md # Column definitions & output format
+    ├── faab-analysis.md    # FAAB bid analysis system
+    ├── transactions.md     # Transaction submission flow
+    ├── schedule-analysis.md # Schedule scoring & FAAB adjustment
+    └── example-run.md      # Full annotated example output
 ```
 
 ## 9-Category Scoring
@@ -135,3 +145,12 @@ nba-fantasy-advisor/
 - **requests** — HTTP client (ESPN injury API)
 - **tabulate** — Terminal table formatting
 - **python-dotenv** — Environment variable management
+
+## Technical Notes
+
+- **Dynamic game_id**: The Yahoo game_id (which changes every season) is auto-resolved via `get_current_game_info()` on each run — no manual config update needed across seasons.
+- **OAuth retry**: yfpy's `get_response` refreshes the token on 401 but doesn't retry the request. The tool patches this with automatic re-authentication and back-off (up to 3 retries).
+- **Unicode normalization**: Player names with diacritics (Dončić, Nurkić, Porziņģis) are handled via NFKD decomposition for reliable cross-source matching.
+- **FAAB tier floors**: Percentile-based tier boundaries are clamped to absolute score minimums (Elite ≥ 4.0, Strong ≥ 2.5, etc.) to prevent weak waiver pools from inflating labels.
+- **IQR outlier detection**: Premium/returning-star bids are separated from standard bids using IQR analysis, preventing them from skewing tier bid statistics.
+- **Smart transaction counting**: Multiple bids against the same drop player count as one transaction slot (unique drops, not total bids).

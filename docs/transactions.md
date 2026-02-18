@@ -92,8 +92,9 @@ Only players in this list can be dropped. Everyone else on your roster is treate
 ### FAAB settings (`config.py`)
 
 ```python
-FAAB_ENABLED = False            # Set to True if your league uses FAAB bidding
+FAAB_ENABLED = True              # Set to True if your league uses FAAB bidding
 DEFAULT_FAAB_BID = 1            # Fallback bid when no historical data available
+FAAB_BID_OVERRIDE = True         # Prompt to override suggested bid (False = auto-accept)
 FAAB_STRATEGY = "competitive"    # "value", "competitive", or "aggressive"
 FAAB_BUDGET_REGULAR_SEASON = 300 # Total regular season FAAB budget
 FAAB_BUDGET_PLAYOFFS = 100       # FAAB budget after playoff reset
@@ -106,7 +107,9 @@ FAAB_MAX_BID_PERCENT = 0.50      # Max % of remaining budget on a single bid
 WEEKLY_TRANSACTION_LIMIT = 3     # Max transactions per week (resets Monday)
 ```
 
-The tool checks your transactions since the most recent Monday and enforces this limit. If you've already used all 3 transactions this week, the claim flow exits early with a message.
+The tool checks your transactions since the start of the current fantasy week and enforces this limit. If you've already used all 3 transactions this week, the claim flow exits early with a message.
+
+**Smart transaction counting:** Multiple bids against the **same drop player** only count as one transaction slot. Yahoo processes claims in priority order — if you queue 3 bids all dropping the same player, they consume only 1 of your 3 weekly slots (since at most one will actually execute). The tool counts *unique drop players* rather than total queued bids.
 
 If `FAAB_ENABLED` is `True`, the transaction flow will:
 
@@ -243,7 +246,7 @@ Several safeguards prevent accidental transactions:
 
 | Guard | Description |
 |-------|-------------|
-| **Weekly transaction limit** | Enforces 3/week cap; blocks new claims when limit reached |
+| **Weekly transaction limit** | Enforces 3/week cap; counts unique drop players (multiple bids against same drop = 1 slot) |
 | **FAAB budget caps** | Max single bid = 50% of remaining; hard cap at remaining budget |
 | **IL/IL+ compliance** | Auto-checks IL slots and resolves non-compliance before proceeding |
 | **Droppable list** | Only players in `DROPPABLE_PLAYERS` can be dropped |
@@ -288,6 +291,7 @@ src/transactions.py
 │   └── run_transaction_flow()           # Interactive multi-bid menu
 │       ├── IL auto-resolution           # Pre-flight fix for IL violations
 │       ├── FAAB analysis integration    # Inline bid suggestions
+│       ├── _unique_drops_used()         # Count unique drop players in queue
 │       ├── Multi-bid queue loop         # Queue multiple claims
 │       └── Batch submission             # Submit all claims sequentially
 ├── FAAB integration (imported from src/faab_analyzer.py)
@@ -304,5 +308,5 @@ src/transactions.py
 - **Read vs Write scope:** Yahoo's Fantasy Sports Developer App settings show only a "Read" toggle. Despite the label, the Fantasy Sports OAuth scope covers both read and write operations as long as you are the team manager.
 - **yfpy is read-only:** yfpy itself has no write methods. This module works around that by directly accessing yfpy's internal OAuth session for POST requests.
 - **Waiver processing:** Submitting a claim doesn't guarantee the pickup. Yahoo processes waivers on its normal schedule (typically overnight). The claim enters the waiver queue.
-- **Multiple bids, same drop player:** You can drop the same player for different add targets. Yahoo processes claims in priority order — if the first claim wins, the rest are automatically voided.
-- **No budget tracking:** The claim flow now tracks your remaining FAAB budget and enforces bid caps. Budget status (FLUSH/HEALTHY/TIGHT/CRITICAL) is displayed at the start of the claim flow.
+- **Multiple bids, same drop player:** You can drop the same player for different add targets. Yahoo processes claims in priority order — if the first claim wins, the rest are automatically voided. The tool correctly counts unique drop players rather than total bids when tracking your weekly transaction limit.
+- **Budget tracking:** The claim flow reads your remaining FAAB balance from Yahoo, displays budget status (FLUSH/HEALTHY/TIGHT/CRITICAL), and enforces bid caps based on remaining budget.

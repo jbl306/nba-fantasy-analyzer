@@ -39,6 +39,19 @@ When generating bid suggestions, tier boundaries are computed **dynamically from
 
 This makes tiers adapt automatically to league depth — a shallow 8-team league and a deep 14-team league will have different Adj_Score cutoffs for "Elite," but the top 10% is always "Elite."
 
+### Tier Minimum Floors
+
+To prevent weak waiver pools from inflating tier labels (e.g., a 0.48 Adj_Score player being called "Elite"), each tier has an **absolute minimum floor**:
+
+| Tier | Minimum Adj_Score |
+|------|------------------|
+| **Elite** | ≥ 4.0 |
+| **Strong** | ≥ 2.5 |
+| **Solid** | ≥ 1.5 |
+| **Streamer** | ≥ 0.5 |
+
+Each tier threshold is the **maximum** of the percentile-derived value and its floor. This ensures tier labels always carry meaningful absolute weight regardless of pool quality.
+
 ### Fallback (absolute) Tiers
 
 If the waiver pool DataFrame is unavailable or has fewer than 10 players, hard-coded absolute thresholds are used as a fallback:
@@ -69,25 +82,41 @@ The analyzer calls `query.get_league_transactions()` via yfpy to retrieve every 
 
 ### Three Reports
 
-The analysis produces three statistical breakdowns:
+The analysis produces four statistical breakdowns:
 
 #### 1. League-Wide Summary
 
-Overall bidding behavior across all teams:
+Overall bidding behavior across all teams. Standard bids and premium bids are reported separately:
 
 ```
-Total transactions:  87
-FAAB bids:           52
-Free pickups ($0):   35
+Total transactions:  207
+FAAB bids:           127
+Free pickups ($0):   80
+Standard bids:       121
+Premium bids:        6  (outlier threshold: $23)
 
-League bid mean:     $8.7
-League bid median:   $5.0
-Highest bid:         $47
-Lowest bid:          $1
-Bid std deviation:   $9.3
+Standard bid mean:   $6.8
+Standard bid median: $6
+Standard bid max:    $21
+Standard bid min:    $1
+Bid std deviation:   $5.2
+Raw mean (all bids): $9.4  (includes premium)
 ```
 
-#### 2. Bids by Player Quality Tier
+#### 2. Premium Pickups (Outlier Detection)
+
+Premium bids are detected using **IQR-based outlier analysis**: any bid above `Q3 + 1.5 × IQR` is classified as a premium/outlier bid. These represent returning-star acquisitions (e.g., Paul George, Jayson Tatum) that command extraordinary prices.
+
+Premium bids are **excluded from standard tier statistics** to prevent inflation — a single $113 bid for Marvin Bagley III would otherwise skew the "Dart" tier median upward.
+
+```
+Premium bid count:   6
+Premium bid mean:    $60.8
+Premium bid median:  $44.5
+Premium bid range:   $31 - $113
+```
+
+#### 3. Bids by Player Quality Tier
 
 Bid distribution bucketed by what quality of player was picked up:
 
@@ -101,7 +130,7 @@ Bid distribution bucketed by what quality of player was picked up:
 
 This is the most important table — it tells you exactly what your league pays for each quality of player.
 
-#### 3. Spending by Team
+#### 4. Spending by Team
 
 Shows which teams are aggressive spenders and which are conservative:
 
@@ -252,8 +281,9 @@ All FAAB settings are in `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `FAAB_ENABLED` | `False` | Set to `True` if your league uses FAAB bidding |
+| `FAAB_ENABLED` | `True` | Set to `True` if your league uses FAAB bidding |
 | `DEFAULT_FAAB_BID` | `1` | Fallback bid when no historical data is available |
+| `FAAB_BID_OVERRIDE` | `True` | Prompt to override suggested bid (`False` = auto-accept) |
 | `FAAB_STRATEGY` | `"competitive"` | Default strategy: `"value"`, `"competitive"`, or `"aggressive"` |
 | `FAAB_BUDGET_REGULAR_SEASON` | `300` | Total FAAB budget for the regular season |
 | `FAAB_BUDGET_PLAYOFFS` | `100` | FAAB budget after playoff reset |
@@ -280,13 +310,16 @@ The system reads your remaining FAAB balance from Yahoo and computes budget heal
 ```
 src/faab_analyzer.py
 ├── Constants
-│   └── TIER_THRESHOLDS           # Quality tier definitions
+│   ├── DEFAULT_TIER_THRESHOLDS   # Fallback absolute tier definitions
+│   ├── _TIER_PERCENTILES         # Percentile boundaries for relative tiers
+│   └── _TIER_MIN_FLOORS          # Absolute minimum score floors per tier
 ├── Tier Classification
+│   ├── compute_relative_tiers()  # Waiver pool → percentile-based thresholds (with floors)
 │   └── score_to_tier()           # Adj_Score → tier label
 ├── Data Fetching
 │   └── fetch_league_transactions()  # Yahoo API → parsed transaction list
 ├── Analysis
-│   ├── analyze_bid_history()     # Stats: overall, by_tier, by_team
+│   ├── analyze_bid_history()     # Stats: overall, by_tier, by_team, premium outliers
 │   ├── suggest_bid()             # Single player → bid recommendation
 │   └── suggest_bids_for_recommendations()  # Batch bid suggestions
 ├── Display
