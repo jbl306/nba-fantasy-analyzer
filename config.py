@@ -18,6 +18,20 @@ YAHOO_TEAM_ID = int(os.environ.get("YAHOO_TEAM_ID", "9"))
 YAHOO_GAME_CODE = os.environ.get("YAHOO_GAME_CODE", "nba")
 
 # Roster management settings
+# AUTO_DETECT_DROPPABLE: When True, automatically identify the lowest-value
+# players on your roster by z-score and offer them as drop candidates.
+# When False, fall back to the manual DROPPABLE_PLAYERS list below.
+AUTO_DETECT_DROPPABLE = True
+
+# Number of bottom-ranked roster players to flag as droppable.
+AUTO_DROPPABLE_COUNT = 3
+
+# Players that should NEVER be auto-detected as droppable, even if their
+# z-score is low (e.g. injured stars you're stashing).
+UNDDROPPABLE_PLAYERS: list[str] = []
+
+# Manual droppable list — used when AUTO_DETECT_DROPPABLE = False,
+# or as additional forced-droppable entries when AUTO_DETECT_DROPPABLE = True.
 # Only these players on your roster are eligible to be dropped.
 # Everyone else is considered untouchable.
 DROPPABLE_PLAYERS = [

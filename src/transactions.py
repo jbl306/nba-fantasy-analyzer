@@ -516,7 +516,10 @@ def resolve_il_violations(
 
         if not remaining:
             print(f"\n  ✗ No droppable players left to resolve {il_player} in {slot}")
-            print(f"    Add more players to DROPPABLE_PLAYERS in config.py")
+            if getattr(config, "AUTO_DETECT_DROPPABLE", False):
+                print(f"    Increase AUTO_DROPPABLE_COUNT in config.py")
+            else:
+                print(f"    Add more players to DROPPABLE_PLAYERS in config.py")
             return False, consumed
 
         # Pick the first available droppable player
@@ -601,7 +604,7 @@ def submit_add_drop(
         return {
             "success": False,
             "message": f"Could not find '{drop_player_name}' on your roster. "
-                       f"Check spelling or update DROPPABLE_PLAYERS in config.py.",
+                       f"Check spelling or update drop settings in config.py.",
         }
     print(f"    Found: {drop_player_name} -> {drop_key}")
 
@@ -740,10 +743,26 @@ def run_transaction_flow(
               f" | Max bid: ${budget_status['max_single_bid']}")
 
     # Build the working droppable list
-    droppable = list(config.DROPPABLE_PLAYERS)  # mutable copy
+    # When AUTO_DETECT_DROPPABLE is on, rank roster by z-score and pick
+    # the bottom N players. Otherwise fall back to the manual list.
+    if getattr(config, "AUTO_DETECT_DROPPABLE", False) and nba_stats is not None:
+        from src.waiver_advisor import analyze_roster, identify_droppable_players
+        my_roster = get_my_team_roster(query)
+        roster_df = analyze_roster(my_roster, nba_stats)
+        droppable = identify_droppable_players(roster_df)
+        _auto_mode = True
+    else:
+        droppable = list(config.DROPPABLE_PLAYERS)  # mutable copy
+        roster_df = pd.DataFrame()
+        _auto_mode = False
+
     if not droppable:
-        print("\nERROR: No droppable players configured.")
-        print("Add player names to DROPPABLE_PLAYERS in config.py")
+        print("\nERROR: No droppable players identified.")
+        if _auto_mode:
+            print("Auto-detect found no eligible players. Check UNDDROPPABLE_PLAYERS in config.py.")
+        else:
+            print("Add player names to DROPPABLE_PLAYERS in config.py")
+            print("  or set AUTO_DETECT_DROPPABLE = True to auto-rank by z-score.")
         return
 
     # Check IL/IL+ roster compliance
@@ -762,8 +781,11 @@ def run_transaction_flow(
         needed = len(il_violations)
         if needed > len(droppable):
             print(f"\n  ✗ Need {needed} droppable players for IL resolution but only "
-                  f"{len(droppable)} configured.")
-            print(f"    Add more players to DROPPABLE_PLAYERS in config.py.")
+                  f"{len(droppable)} available.")
+            if _auto_mode:
+                print(f"    Increase AUTO_DROPPABLE_COUNT (currently {config.AUTO_DROPPABLE_COUNT}) in config.py.")
+            else:
+                print(f"    Add more players to DROPPABLE_PLAYERS in config.py.")
             return
 
         remaining_after = len(droppable) - needed
@@ -787,16 +809,29 @@ def run_transaction_flow(
         if not droppable:
             print("\n  \u26a0  All droppable players were used for IL resolution.")
             print("  No players left to drop for waiver bids.")
-            print("  Add more players to DROPPABLE_PLAYERS in config.py.")
+            if _auto_mode:
+                print(f"  Increase AUTO_DROPPABLE_COUNT (currently {config.AUTO_DROPPABLE_COUNT}) in config.py.")
+            else:
+                print("  Add more players to DROPPABLE_PLAYERS in config.py.")
             return
     else:
         print("  \u2713 IL/IL+ slots are compliant")
 
-    print(f"\nYour droppable players ({len(droppable)}):")
+    _mode_label = "auto-detected" if _auto_mode else "configured"
+    print(f"\nYour droppable players — {_mode_label} ({len(droppable)}):")
     for i, name in enumerate(droppable, 1):
         key = find_player_key_on_roster(query, name)
-        status = f"({key})" if key else "(NOT FOUND on roster!)"
-        print(f"  {i}. {name:<30} {status}")
+        key_str = f"({key})" if key else "(NOT FOUND on roster!)"
+        # Show z-score when available for transparency
+        z_str = ""
+        if not roster_df.empty and "Z_TOTAL" in roster_df.columns:
+            match = roster_df.loc[
+                roster_df["name"].apply(normalize_name) == normalize_name(name)
+            ]
+            if not match.empty:
+                z_val = match.iloc[0]["Z_TOTAL"]
+                z_str = f"  Z: {z_val:+.2f}"
+        print(f"  {i}. {name:<30} {key_str}{z_str}")
 
     # Show top recommendations (with bid suggestions if FAAB)
     if rec_df is None or rec_df.empty:

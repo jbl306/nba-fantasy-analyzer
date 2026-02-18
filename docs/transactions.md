@@ -4,7 +4,9 @@ This document describes how the NBA Fantasy Advisor submits waiver wire transact
 
 ## Overview
 
-After the recommendation engine identifies the best available waiver pickups, you can optionally submit **add/drop transactions** directly from the command line. This drops a player from your configurable droppable list and picks up a recommended waiver target — all without leaving the terminal.
+After the recommendation engine identifies the best available waiver pickups, you can optionally submit **add/drop transactions** directly from the command line. This drops a player from your roster and picks up a recommended waiver target — all without leaving the terminal.
+
+Drop candidates are identified automatically by ranking your roster by z-score and flagging the lowest-value players (see [Droppable Players](#droppable-players-configpy) below). You can also configure a manual list or protect specific players from being auto-detected.
 
 The flow supports **multiple bids per session** — you can queue several add/drop claims and submit them all at once. Yahoo processes them in priority order.
 
@@ -79,7 +81,36 @@ python main.py --dry-run --days 7      # Use 7-day window, preview claim
 
 ### Droppable players (`config.py`)
 
+#### Auto-detect mode (default)
+
 ```python
+AUTO_DETECT_DROPPABLE = True   # Rank roster by z-score and flag the bottom N
+AUTO_DROPPABLE_COUNT = 3       # Number of lowest-value players to flag
+UNDDROPPABLE_PLAYERS = []      # Players that should NEVER be auto-flagged
+```
+
+When `AUTO_DETECT_DROPPABLE = True`, the tool computes your roster's per-player z-scores and automatically identifies the bottom `AUTO_DROPPABLE_COUNT` players as drop candidates. This eliminates the need to manually edit a Python list every time your roster changes.
+
+Use `UNDDROPPABLE_PLAYERS` to protect specific players from being auto-flagged (e.g., injured stars you're stashing on IL):
+
+```python
+UNDDROPPABLE_PLAYERS = ["Kawhi Leonard"]  # Never auto-flag as droppable
+```
+
+The transaction flow labels auto-detected players and shows their z-scores for transparency:
+
+```
+Your droppable players — auto-detected (3):
+  1. Deep Bench Player            (418.p.1234)  Z: -3.00
+  2. Bench Warmer                 (418.p.5678)  Z: -1.50
+  3. Mid Rotation Guy             (418.p.9012)  Z: +0.30
+```
+
+#### Manual mode
+
+```python
+AUTO_DETECT_DROPPABLE = False  # Use manual list only
+
 DROPPABLE_PLAYERS = [
     "Sandro Mamukelashvili",
     "Justin Champagnie",
@@ -87,7 +118,9 @@ DROPPABLE_PLAYERS = [
 ]
 ```
 
-Only players in this list can be dropped. Everyone else on your roster is treated as untouchable. Update this list as your roster changes.
+When `AUTO_DETECT_DROPPABLE = False`, only players in `DROPPABLE_PLAYERS` can be dropped. Everyone else on your roster is treated as untouchable.
+
+> **Note:** When auto-detect is on, any players in `DROPPABLE_PLAYERS` are still included as forced entries (merged with the auto-detected list, deduplicated).
 
 ### FAAB settings (`config.py`)
 
@@ -134,14 +167,14 @@ Before any transaction can be submitted, the tool checks your IL and IL+ roster 
 
 If a player in an IL slot has recovered (no longer has an eligible status), Yahoo **blocks all transactions** for your team. The tool detects this and auto-resolves it in two steps:
 
-1. **Drop a player** from your `DROPPABLE_PLAYERS` list to free a roster spot
+1. **Drop a player** from the droppable list (auto-detected or manual) to free a roster spot
 2. **Move the non-compliant IL player** to the bench (BN) via a roster position PUT
 
 This happens automatically — no manual intervention on the Yahoo website needed. The consumed droppable player(s) are then removed from the available list for the subsequent waiver bids.
 
-**Example:** If you have 3 droppable players and 1 IL violation, the tool drops player #1 to resolve IL, then shows the remaining 2 players as options for your FAAB bid.
+**Example:** If you have 3 droppable players (auto-detected or manual) and 1 IL violation, the tool drops player #1 to resolve IL, then shows the remaining 2 players as options for your FAAB bid.
 
-If there aren't enough droppable players to cover both IL resolution AND at least one waiver bid, the tool will warn you and stop.
+If there aren't enough droppable players to cover both IL resolution AND at least one waiver bid, the tool will warn you and suggest increasing `AUTO_DROPPABLE_COUNT` (auto mode) or adding players to `DROPPABLE_PLAYERS` (manual mode).
 
 ### 1. Player key resolution
 
@@ -249,7 +282,7 @@ Several safeguards prevent accidental transactions:
 | **Weekly transaction limit** | Enforces 3/week cap; counts unique drop players (multiple bids against same drop = 1 slot) |
 | **FAAB budget caps** | Max single bid = 50% of remaining; hard cap at remaining budget |
 | **IL/IL+ compliance** | Auto-checks IL slots and resolves non-compliance before proceeding |
-| **Droppable list** | Only players in `DROPPABLE_PLAYERS` can be dropped |
+| **Droppable list** | Only auto-detected low-value players or manually configured `DROPPABLE_PLAYERS` can be dropped |
 | **Roster verification** | Confirms the drop player is actually on your roster |
 | **Player key validation** | Both add and drop player keys must resolve before proceeding |
 | **Explicit confirmation** | Prompts "Submit all claims? (yes/no)" before submitting any queued claims |
@@ -261,7 +294,7 @@ Several safeguards prevent accidental transactions:
 | Error | Cause | Fix |
 |-------|-------|-----|
 | "IL resolution failed" | Drop or roster move was rejected by Yahoo | Check the error details; the player may already be in a valid state |
-| "Could not find X on your roster" | Drop player name doesn't match any roster player | Check spelling in `DROPPABLE_PLAYERS`; names must match Yahoo's format |
+| "Could not find X on your roster" | Drop player name doesn't match any roster player | Check spelling in `DROPPABLE_PLAYERS` or `UNDDROPPABLE_PLAYERS`; names must match Yahoo's format |
 | "Could not find player key for X" | Add player not found in Yahoo's player pool | Verify the player name matches Yahoo's listing |
 | HTTP 401 | OAuth token expired or invalid | Delete `token.json` in project root and re-authenticate |
 | HTTP 403 | Insufficient API permissions | Verify your Yahoo Developer App has Fantasy Sports checked |

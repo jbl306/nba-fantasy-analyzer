@@ -19,7 +19,15 @@
 | `TOP_N_RECOMMENDATIONS` | `15` | Number of recommendations to display |
 | `RECENT_GAMES_WINDOW` | `14` | Days to evaluate recent player form |
 | `PUNT_CATEGORIES` | `[]` | Categories to exclude from scoring |
-| `DROPPABLE_PLAYERS` | `[list]` | Players eligible for drop in claims |
+
+### Roster Management
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `AUTO_DETECT_DROPPABLE` | `True` | Auto-identify lowest-value players as drop candidates by z-score |
+| `AUTO_DROPPABLE_COUNT` | `3` | Number of bottom-ranked players to flag as droppable |
+| `UNDDROPPABLE_PLAYERS` | `[]` | Players that should never be auto-flagged (e.g., stashed injured stars) |
+| `DROPPABLE_PLAYERS` | `[list]` | Manual droppable list (fallback when auto off; forced entries when auto on) |
 
 ### FAAB Settings
 

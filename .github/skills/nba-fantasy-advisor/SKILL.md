@@ -142,6 +142,10 @@ src/
 - **Dynamic game_id**: Yahoo season `game_id` auto-resolved via API each run.
 - **OAuth Retry**: Patches yfpy's 401 handling with automatic re-auth and
   exponential back-off (up to 3 retries).
+- **Auto-Detect Droppable Players**: When `AUTO_DETECT_DROPPABLE = True`,
+  ranks your roster by Z_TOTAL and flags the bottom N as drop candidates.
+  `UNDDROPPABLE_PLAYERS` protects stashed stars. Falls back to manual
+  `DROPPABLE_PLAYERS` list when disabled.
 - **Transaction Safety**: IL/IL+ compliance checks block invalid transactions.
   Weekly transaction limit tracked with unique-drop counting.
 
@@ -209,7 +213,7 @@ User says: "Claim Player X and drop Player Y for $15"
 
 Actions:
 1. Verify Player X is available on waivers
-2. Confirm Player Y is in your droppable players list
+2. Auto-detect lowest-value roster player as drop candidate (or use manual list)
 3. Check IL compliance and weekly transaction limit
 4. Submit XML POST to Yahoo Fantasy API
 5. Confirm successful claim

@@ -169,6 +169,15 @@ All configuration lives in `config.py` and can be adjusted:
 | `TOP_N_RECOMMENDATIONS` | 15 | Default number of recommendations |
 | `DETAILED_LOG_LIMIT` | 10 | Number of candidates to fetch game logs for |
 
+### Roster Management
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `AUTO_DETECT_DROPPABLE` | `True` | Auto-identify lowest-value roster players as drop candidates by z-score |
+| `AUTO_DROPPABLE_COUNT` | `3` | Number of bottom-ranked players to flag as droppable |
+| `UNDDROPPABLE_PLAYERS` | `[]` | Players that should never be auto-flagged (e.g., stashed injured stars) |
+| `DROPPABLE_PLAYERS` | `[list]` | Manual droppable list (fallback when auto-detect is off; forced entries when on) |
+
 ### FAAB Settings
 
 | Setting | Default | Description |

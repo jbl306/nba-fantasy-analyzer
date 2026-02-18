@@ -153,4 +153,5 @@ nba-fantasy-advisor/
 - **Unicode normalization**: Player names with diacritics (Dončić, Nurkić, Porziņģis) are handled via NFKD decomposition for reliable cross-source matching.
 - **FAAB tier floors**: Percentile-based tier boundaries are clamped to absolute score minimums (Elite ≥ 4.0, Strong ≥ 2.5, etc.) to prevent weak waiver pools from inflating labels.
 - **IQR outlier detection**: Premium/returning-star bids are separated from standard bids using IQR analysis, preventing them from skewing tier bid statistics.
+- **Auto-detect droppable players**: When `AUTO_DETECT_DROPPABLE = True`, the tool ranks your roster by z-score and auto-identifies the bottom N players as drop candidates — no manual config edits needed when your roster changes. Use `UNDDROPPABLE_PLAYERS` to protect stashed players.
 - **Smart transaction counting**: Multiple bids against the same drop player count as one transaction slot (unique drops, not total bids).

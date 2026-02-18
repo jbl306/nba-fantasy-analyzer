@@ -119,6 +119,69 @@ def analyze_roster(
     return roster_df
 
 
+def identify_droppable_players(
+    roster_df: pd.DataFrame,
+    count: int | None = None,
+) -> list[str]:
+    """Auto-detect the lowest-value players on your roster by Z_TOTAL.
+
+    Uses ``config.AUTO_DETECT_DROPPABLE`` as the feature toggle:
+      - True: rank roster by z-score, return the bottom N names.
+      - False: return ``config.DROPPABLE_PLAYERS`` as-is.
+
+    Players listed in ``config.UNDDROPPABLE_PLAYERS`` are never included.
+    Players listed in ``config.DROPPABLE_PLAYERS`` are always included
+    (even in auto mode) as forced entries.
+
+    Args:
+        roster_df: DataFrame from ``analyze_roster`` with ``name`` and
+            ``Z_TOTAL`` columns.
+        count: How many auto-detected droppable players to return.
+            Defaults to ``config.AUTO_DROPPABLE_COUNT``.
+
+    Returns:
+        List of player names eligible to be dropped, lowest-value first.
+    """
+    if count is None:
+        count = getattr(config, "AUTO_DROPPABLE_COUNT", 3)
+
+    # Normalise the undroppable set for comparison
+    undroppable = {
+        normalize_name(n)
+        for n in getattr(config, "UNDDROPPABLE_PLAYERS", [])
+    }
+
+    manual_list = list(config.DROPPABLE_PLAYERS)
+
+    # ---- Feature off: return the manual list only ----
+    if not getattr(config, "AUTO_DETECT_DROPPABLE", False):
+        return manual_list
+
+    # ---- Feature on: rank by Z_TOTAL ascending (worst first) ----
+    if roster_df.empty or "Z_TOTAL" not in roster_df.columns:
+        # Can't compute — fall back to manual list
+        return manual_list
+
+    # Filter out undroppable players
+    eligible = roster_df[
+        ~roster_df["name"].apply(lambda n: normalize_name(n) in undroppable)
+    ].copy()
+
+    eligible = eligible.sort_values("Z_TOTAL", ascending=True)
+    auto_names = eligible.head(count)["name"].tolist()
+
+    # Merge: auto-detected + manual (deduplicated, preserving order)
+    seen = set()
+    merged: list[str] = []
+    for name in auto_names + manual_list:
+        norm = normalize_name(name)
+        if norm not in seen and norm not in undroppable:
+            seen.add(norm)
+            merged.append(name)
+
+    return merged
+
+
 def identify_team_needs(roster_df: pd.DataFrame) -> dict[str, float]:
     """Identify which stat categories your team is weakest in.
 
@@ -606,12 +669,13 @@ def run_waiver_analysis(skip_yahoo: bool = False, return_data: bool = False):
     # ---------------------------------------------------------------
     # STEP 6b: Print schedule comparison report
     # ---------------------------------------------------------------
+    droppable_names = identify_droppable_players(roster_df)
     if schedule_analysis:
         try:
             sched_report = fmt_sched(
                 schedule_analysis,
                 waiver_df=recommendations,
-                droppable_names=list(config.DROPPABLE_PLAYERS),
+                droppable_names=droppable_names,
                 nba_stats=nba_stats,
             )
             print(sched_report)
