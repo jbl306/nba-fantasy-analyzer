@@ -236,7 +236,19 @@ Examples:
     # ---------------------------------------------------------------
     if args.stream:
         from src.waiver_advisor import run_streaming_analysis
-        run_streaming_analysis()
+
+        if args.watch:
+            # --stream --watch: run streaming analysis and email results
+            from src.notifier import send_email_report
+            rec_df = run_streaming_analysis(return_data=True)
+            if rec_df is not None and not rec_df.empty:
+                top_n = config.TOP_N_RECOMMENDATIONS
+                print(f"\n  Sending streaming report via email (top {top_n})...")
+                send_email_report(rec_df, top_n=top_n, mode="stream")
+            else:
+                print("  No streaming recommendations to send.")
+        else:
+            run_streaming_analysis()
         return
 
     print()

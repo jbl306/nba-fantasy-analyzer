@@ -780,12 +780,19 @@ def format_recommendations(
     return "\n".join(lines)
 
 
-def run_streaming_analysis() -> None:
+def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     """Streaming mode: find the best available player with a game *today*.
 
     Identifies your weakest roster spot, filters the waiver pool to only
     players whose team plays today, and ranks them with need-weighting.
     Designed for daily streaming add/drops to maximise counting stats.
+
+    Args:
+        return_data: If True, return the recommendations DataFrame for
+                     downstream use (e.g. email notification).
+
+    Returns:
+        None normally, or recommendations DataFrame if return_data=True.
     """
     from datetime import date as _date
 
@@ -974,6 +981,10 @@ def run_streaming_analysis() -> None:
 
     print("  Streaming = daily add/drop to fill your roster with players who have games today.")
     print("  Run with --claim to submit the transaction.\n")
+
+    if return_data:
+        return recommendations
+    return None
 
 
 def run_waiver_analysis(

@@ -1,0 +1,74 @@
+# NBA Fantasy Advisor — Daily Streaming Picks
+#
+# Finds the best available player with a game TODAY and emails results.
+# Designed for daily streaming add/drop strategies.
+#
+# Triggers:
+#   - Manual:    Run from the Actions tab whenever you want during the day
+#   - Automatic: 12:30 AM ET (05:30 UTC) every day — after evening games finish
+#
+# Uses the same secrets as nightly-watch.yml — see that file for setup.
+# ────────────────────────────────────────────────────────────────────
+
+name: "Daily Streaming Picks"
+
+on:
+  schedule:
+    # 12:30 AM ET = 05:30 UTC (EST) / 04:30 UTC (EDT)
+    - cron: "30 5 * * *"
+
+  # Manual trigger — run from the Actions tab anytime during the day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build .env from secrets
+        run: |
+          cat > .env << 'ENVEOF'
+          YAHOO_CONSUMER_KEY=${{ secrets.YAHOO_CONSUMER_KEY }}
+          YAHOO_CONSUMER_SECRET=${{ secrets.YAHOO_CONSUMER_SECRET }}
+          YAHOO_LEAGUE_ID=${{ secrets.YAHOO_LEAGUE_ID }}
+          YAHOO_TEAM_ID=${{ secrets.YAHOO_TEAM_ID }}
+          YAHOO_GAME_CODE=nba
+          YAHOO_ACCESS_TOKEN=${{ secrets.YAHOO_ACCESS_TOKEN }}
+          YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
+          YAHOO_TOKEN_TYPE=${{ secrets.YAHOO_TOKEN_TYPE }}
+          NOTIFY_EMAIL_TO=${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_SMTP_PASSWORD=${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          ENVEOF
+
+      - name: Fix OUTPUT_DIR for Linux
+        run: |
+          mkdir -p outputs
+          sed -i 's|OUTPUT_DIR = .*|OUTPUT_DIR = Path("outputs")|' config.py
+
+      - name: Run streaming analysis
+        run: python main.py --stream --watch
+        timeout-minutes: 10
+
+      - name: Upload output artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: streaming-report-${{ github.run_number }}
+          path: outputs/
+          retention-days: 7
