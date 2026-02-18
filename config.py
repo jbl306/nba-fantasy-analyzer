@@ -18,6 +18,20 @@ YAHOO_TEAM_ID = int(os.environ.get("YAHOO_TEAM_ID", "9"))
 YAHOO_GAME_CODE = os.environ.get("YAHOO_GAME_CODE", "nba")
 
 # Roster management settings
+# AUTO_DETECT_DROPPABLE: When True, automatically identify the lowest-value
+# players on your roster by z-score and offer them as drop candidates.
+# When False, fall back to the manual DROPPABLE_PLAYERS list below.
+AUTO_DETECT_DROPPABLE = True
+
+# Number of bottom-ranked roster players to flag as droppable.
+AUTO_DROPPABLE_COUNT = 3
+
+# Players that should NEVER be auto-detected as droppable, even if their
+# z-score is low (e.g. injured stars you're stashing).
+UNDDROPPABLE_PLAYERS: list[str] = []
+
+# Manual droppable list — used when AUTO_DETECT_DROPPABLE = False,
+# or as additional forced-droppable entries when AUTO_DETECT_DROPPABLE = True.
 # Only these players on your roster are eligible to be dropped.
 # Everyone else is considered untouchable.
 DROPPABLE_PLAYERS = [
@@ -52,8 +66,7 @@ PREMIUM_BID_FLOOR = 15     # Minimum bid to be classified as "premium"
 OUTLIER_IQR_FACTOR = 1.5   # IQR multiplier for outlier detection
 
 # Transaction limits
-# Number of add/drop transactions allowed per fantasy week (Mon-Sun).
-# Resets at the start of each Monday.
+# Default weekly add/drop limit (auto-detected from Yahoo when connected).
 WEEKLY_TRANSACTION_LIMIT = 3
 
 # Schedule analysis settings
@@ -85,6 +98,15 @@ INACTIVE_DAYS_THRESHOLD = 10
 
 # How many top waiver candidates to fetch detailed game logs for
 DETAILED_LOG_LIMIT = 10
+
+# Hot-pickup / trending detection
+# Weights recent performance and ownership trends to catch breakout players
+# before rivals claim them.
+HOT_PICKUP_ENABLED = True          # Enable trending/hot-pickup boost
+HOT_PICKUP_RECENT_GAMES = 3       # Number of recent games to evaluate
+HOT_PICKUP_RECENCY_WEIGHT = 0.25  # Weight for recent-game z-score boost
+HOT_PICKUP_TRENDING_WEIGHT = 0.15 # Weight for ownership-trend (% owned delta) boost
+HOT_PICKUP_MIN_DELTA = 5          # Min % owned increase to trigger trending flag
 
 # Injury report settings
 # Source: Basketball-Reference injury report
@@ -122,5 +144,20 @@ STAT_CATEGORIES = {
 }
 
 # Output directory for saved data
-OUTPUT_DIR = PROJECT_DIR / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR = Path("/mnt/c/Users/joshu/projects/nba-fantasy-advisor/outputs")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Yahoo NBA stat_id → config STAT_CATEGORIES key mapping.
+# Used to validate that your Yahoo league's scoring categories match
+# the 9-cat model this tool expects.  Auto-detected on connection.
+YAHOO_STAT_ID_MAP: dict[int, str] = {
+    5:  "FG_PCT",   # FG%
+    8:  "FT_PCT",   # FT%
+    10: "FG3M",     # 3PTM
+    12: "PTS",      # Points
+    15: "REB",      # Rebounds
+    16: "AST",      # Assists
+    17: "STL",      # Steals
+    18: "BLK",      # Blocks
+    19: "TOV",      # Turnovers
+}

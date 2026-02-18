@@ -126,11 +126,36 @@ python main.py --skip-yahoo
 python main.py --top 25
 ```
 
+### Streaming mode (best pickup with a game today)
+
+```bash
+python main.py --stream
+```
+
+### Watch mode (scheduled email report)
+
+```bash
+python main.py --watch
+```
+
+Runs the full analysis and emails the top recommendations. Designed for scheduled execution (GitHub Actions, Task Scheduler, cron) — see [Watch Mode Setup](#watch-mode--scheduled-email-reports) below.
+
+### League & team discovery
+
+```bash
+python main.py --list-leagues             # Show all your NBA fantasy leagues
+python main.py --list-teams               # Show all teams in your configured league
+```
+
 ### Combine flags
 
 ```bash
 python main.py --skip-yahoo --top 30
+python main.py --compact                  # Condensed table output
+python main.py --stream --compact          # Streaming in compact mode
 ```
+
+> **Auto-detect:** League settings (stat categories, roster slots, FAAB mode, transaction limits) are automatically read from the Yahoo API on each run and override `config.py` defaults. Use `--list-leagues` and `--list-teams` to find the correct IDs for your `.env` file.
 
 ---
 
@@ -169,6 +194,15 @@ All configuration lives in `config.py` and can be adjusted:
 | `TOP_N_RECOMMENDATIONS` | 15 | Default number of recommendations |
 | `DETAILED_LOG_LIMIT` | 10 | Number of candidates to fetch game logs for |
 
+### Roster Management
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `AUTO_DETECT_DROPPABLE` | `True` | Auto-identify lowest-value roster players as drop candidates by z-score |
+| `AUTO_DROPPABLE_COUNT` | `3` | Number of bottom-ranked players to flag as droppable |
+| `UNDDROPPABLE_PLAYERS` | `[]` | Players that should never be auto-flagged (e.g., stashed injured stars) |
+| `DROPPABLE_PLAYERS` | `[list]` | Manual droppable list (fallback when auto-detect is off; forced entries when on) |
+
 ### FAAB Settings
 
 | Setting | Default | Description |
@@ -188,10 +222,123 @@ All configuration lives in `config.py` and can be adjusted:
 | `WEEKLY_TRANSACTION_LIMIT` | `3` | Max transactions per week (resets Monday) |
 | `SCHEDULE_WEEKS_AHEAD` | `3` | Number of upcoming weeks to analyze for schedule-based scoring |
 | `SCHEDULE_WEIGHT` | `0.10` | How strongly schedule affects score multiplier (±10% per game delta) |
+
+### Hot Pickup & Trending Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `HOT_PICKUP_ENABLED` | `True` | Enable hot-pickup detection (recent game z-delta analysis + Yahoo trending) |
+| `HOT_PICKUP_RECENT_GAMES` | `3` | Number of recent games to fetch for each candidate |
+| `HOT_PICKUP_RECENCY_WEIGHT` | `0.25` | Additive boost per z_delta point for improving players |
+| `HOT_PICKUP_TRENDING_WEIGHT` | `0.15` | Additive boost for trending players (scaled by ownership delta) |
+| `HOT_PICKUP_MIN_DELTA` | `5` | Minimum %-ownership change to flag a player as 📈 Trending |
 | `SCHEDULE_WEEK_DECAY` | `0.50` | Exponential decay factor for future week weighting |
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--skip-yahoo` | Skip Yahoo API; use NBA stats only |
+| `--top N` | Show N recommendations (default: 15) |
+| `--compact` | Condensed table output |
+| `--claim` | Enter interactive claim submission flow |
+| `--dry-run` | Preview claim XML without submitting |
+| `--faab-history` | Fetch FAAB bid history for smart suggestions |
+| `--strategy S` | FAAB strategy: `value`, `competitive`, `aggressive` |
+| `--days N` | Schedule analysis window in days |
+| `--stream` | Streaming mode — best pickup with a game today |
+| `--watch` | Run analysis once and email results (for scheduled/cron use) |
+| `--list-leagues` | Show all your NBA fantasy leagues and exit |
+| `--list-teams` | Show all teams in your league and exit |
 
 See [FAAB Bid Analysis](faab-analysis.md) for a detailed explanation of strategies and how bid suggestions work.
 See [Schedule Analysis](schedule-analysis.md) for how schedule data is used in scoring and FAAB bids.
+
+---
+
+## Watch Mode — Scheduled Email Reports
+
+The `--watch` flag runs the full analysis once and emails you the results. Pair it with a scheduler so you wake up to waiver recommendations every morning.
+
+### Email Setup (Gmail)
+
+1. **Enable 2-Factor Authentication** on your Google account
+2. Go to [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Create an App Password for "Mail"
+4. Add to your `.env`:
+
+```env
+NOTIFY_EMAIL_TO=joshua.lee89@gmail.com
+NOTIFY_SMTP_PASSWORD=abcd efgh ijkl mnop    # 16-char app password (no spaces in .env)
+```
+
+### Option A: GitHub Actions (Recommended)
+
+Runs on GitHub's servers at 11 PM ET every night — your laptop can be off.
+
+1. **Push the repo to GitHub** (private repo is fine — free tier includes 2,000 minutes/month)
+
+2. **Complete Yahoo OAuth locally** (one-time):
+   ```bash
+   python main.py --list-leagues
+   ```
+   This creates the OAuth tokens in your `.env` file.
+
+3. **Add secrets** in your GitHub repo → Settings → Secrets and variables → Actions:
+
+   | Secret | Value |
+   |--------|-------|
+   | `YAHOO_CONSUMER_KEY` | Your Yahoo app key |
+   | `YAHOO_CONSUMER_SECRET` | Your Yahoo app secret |
+   | `YAHOO_LEAGUE_ID` | Your league ID (e.g., `94443`) |
+   | `YAHOO_TEAM_ID` | Your team number (e.g., `9`) |
+   | `YAHOO_ACCESS_TOKEN` | From `.env` after OAuth |
+   | `YAHOO_REFRESH_TOKEN` | From `.env` after OAuth |
+   | `YAHOO_TOKEN_TYPE` | Usually `bearer` |
+   | `NOTIFY_EMAIL_TO` | Your email address |
+   | `NOTIFY_SMTP_PASSWORD` | Gmail App Password |
+
+4. **Enable the workflow** in the Actions tab
+
+The workflow file is at `.github/workflows/nightly-watch.yml`. It runs at 04:00 UTC (11:00 PM ET) daily and can also be triggered manually from the Actions tab.
+
+> **Token refresh:** Yahoo OAuth tokens expire periodically. If the nightly run fails with an auth error, re-run `python main.py --list-leagues` locally to refresh the token, then update `YAHOO_ACCESS_TOKEN` and `YAHOO_REFRESH_TOKEN` in GitHub Secrets.
+
+### Option B: Windows Task Scheduler
+
+For running directly on your laptop (must be on and awake at the scheduled time):
+
+1. Open **Task Scheduler** → Create Basic Task
+2. **Trigger:** Daily at 11:00 PM
+3. **Action:** Start a program
+   - Program: `C:\Users\joshu\projects\.venv\Scripts\python.exe`
+   - Arguments: `main.py --watch`
+   - Start in: `C:\Users\joshu\projects\nba-fantasy-advisor`
+4. In the task's **Conditions** tab:
+   - ✅ Wake the computer to run this task
+   - ❌ Start only if on AC power (uncheck to run on battery)
+5. In **Settings** tab:
+   - ✅ Run task as soon as possible after a scheduled start is missed
+
+### Option C: WSL / Linux cron
+
+```bash
+# Edit crontab
+crontab -e
+
+# Run at 11 PM ET every day (adjust for your timezone)
+0 23 * * * cd /mnt/c/Users/joshu/projects/nba-fantasy-advisor && /mnt/c/Users/joshu/projects/.venv/bin/python main.py --watch >> /tmp/nba-advisor.log 2>&1
+```
+
+### Testing
+
+Verify email works before enabling the schedule:
+
+```bash
+python main.py --watch
+```
+
+This runs the full analysis and sends the email immediately. Check your inbox (and spam folder) for the report.
 
 ---
 

@@ -4,7 +4,9 @@ This document describes how the NBA Fantasy Advisor submits waiver wire transact
 
 ## Overview
 
-After the recommendation engine identifies the best available waiver pickups, you can optionally submit **add/drop transactions** directly from the command line. This drops a player from your configurable droppable list and picks up a recommended waiver target — all without leaving the terminal.
+After the recommendation engine identifies the best available waiver pickups, you can optionally submit **add/drop transactions** directly from the command line. This drops a player from your roster and picks up a recommended waiver target — all without leaving the terminal.
+
+Drop candidates are identified automatically by ranking your roster by z-score and flagging the lowest-value players (see [Droppable Players](#droppable-players-configpy) below). You can also configure a manual list or protect specific players from being auto-detected.
 
 The flow supports **multiple bids per session** — you can queue several add/drop claims and submit them all at once. Yahoo processes them in priority order.
 
@@ -28,6 +30,7 @@ The flow supports **multiple bids per session** — you can queue several add/dr
 ├─────────────────────────────────────┤
 │  6. Multi-bid loop                  │
 │     Select drop/add + FAAB bid      │
+│     Roster impact preview per swap  │
 │     Repeat for additional claims    │
 ├─────────────────────────────────────┤
 │  7. Review & confirm queued claims  │
@@ -79,7 +82,36 @@ python main.py --dry-run --days 7      # Use 7-day window, preview claim
 
 ### Droppable players (`config.py`)
 
+#### Auto-detect mode (default)
+
 ```python
+AUTO_DETECT_DROPPABLE = True   # Rank roster by z-score and flag the bottom N
+AUTO_DROPPABLE_COUNT = 3       # Number of lowest-value players to flag
+UNDDROPPABLE_PLAYERS = []      # Players that should NEVER be auto-flagged
+```
+
+When `AUTO_DETECT_DROPPABLE = True`, the tool computes your roster's per-player z-scores and automatically identifies the bottom `AUTO_DROPPABLE_COUNT` players as drop candidates. This eliminates the need to manually edit a Python list every time your roster changes.
+
+Use `UNDDROPPABLE_PLAYERS` to protect specific players from being auto-flagged (e.g., injured stars you're stashing on IL):
+
+```python
+UNDDROPPABLE_PLAYERS = ["Kawhi Leonard"]  # Never auto-flag as droppable
+```
+
+The transaction flow labels auto-detected players and shows their z-scores for transparency:
+
+```
+Your droppable players — auto-detected (3):
+  1. Deep Bench Player            (418.p.1234)  Z: -3.00
+  2. Bench Warmer                 (418.p.5678)  Z: -1.50
+  3. Mid Rotation Guy             (418.p.9012)  Z: +0.30
+```
+
+#### Manual mode
+
+```python
+AUTO_DETECT_DROPPABLE = False  # Use manual list only
+
 DROPPABLE_PLAYERS = [
     "Sandro Mamukelashvili",
     "Justin Champagnie",
@@ -87,7 +119,9 @@ DROPPABLE_PLAYERS = [
 ]
 ```
 
-Only players in this list can be dropped. Everyone else on your roster is treated as untouchable. Update this list as your roster changes.
+When `AUTO_DETECT_DROPPABLE = False`, only players in `DROPPABLE_PLAYERS` can be dropped. Everyone else on your roster is treated as untouchable.
+
+> **Note:** When auto-detect is on, any players in `DROPPABLE_PLAYERS` are still included as forced entries (merged with the auto-detected list, deduplicated).
 
 ### FAAB settings (`config.py`)
 
@@ -134,14 +168,14 @@ Before any transaction can be submitted, the tool checks your IL and IL+ roster 
 
 If a player in an IL slot has recovered (no longer has an eligible status), Yahoo **blocks all transactions** for your team. The tool detects this and auto-resolves it in two steps:
 
-1. **Drop a player** from your `DROPPABLE_PLAYERS` list to free a roster spot
+1. **Drop a player** from the droppable list (auto-detected or manual) to free a roster spot
 2. **Move the non-compliant IL player** to the bench (BN) via a roster position PUT
 
 This happens automatically — no manual intervention on the Yahoo website needed. The consumed droppable player(s) are then removed from the available list for the subsequent waiver bids.
 
-**Example:** If you have 3 droppable players and 1 IL violation, the tool drops player #1 to resolve IL, then shows the remaining 2 players as options for your FAAB bid.
+**Example:** If you have 3 droppable players (auto-detected or manual) and 1 IL violation, the tool drops player #1 to resolve IL, then shows the remaining 2 players as options for your FAAB bid.
 
-If there aren't enough droppable players to cover both IL resolution AND at least one waiver bid, the tool will warn you and stop.
+If there aren't enough droppable players to cover both IL resolution AND at least one waiver bid, the tool will warn you and suggest increasing `AUTO_DROPPABLE_COUNT` (auto mode) or adding players to `DROPPABLE_PLAYERS` (manual mode).
 
 ### 1. Player key resolution
 
@@ -220,7 +254,31 @@ Yahoo's Fantasy API expects an XML payload for write operations. The module buil
 </fantasy_content>
 ```
 
-### 3. API submission
+### 3. Roster impact preview
+
+Before confirming each add/drop swap, the tool computes a per-category z-score delta showing the projected impact on your roster:
+
+$$
+\Delta z_c = z_{\text{add},c} - z_{\text{drop},c}
+$$
+
+For each non-punted stat category, the display shows the player's raw z-score and the net delta. Positive deltas (≥ +0.3) are highlighted green, negative deltas (≤ −0.3) red. A net summary row sums all category deltas.
+
+This lets you see exactly which categories improve or worsen from a swap before committing — for example, you might see that adding a player boosts your assists and steals but hurts your FT%. The preview appears in both `--claim` and `--dry-run` modes.
+
+Example output:
+
+```
+  Roster Impact: Drop Bench Warmer → Add Breakout Guard
+  ──────────────────────────────────────────────────────
+  FG%   +0.42   FT%   -0.18   3PM   +0.85
+  PTS   +1.20   REB   -0.50   AST   +0.93
+  STL   +0.30   BLK   -0.10   TO    +0.25
+  ──────────────────────────────────────────────────────
+  Net:  +3.17
+```
+
+### 4. API submission
 
 The module reuses **yfpy's authenticated OAuth session** for all API calls:
 
@@ -249,7 +307,7 @@ Several safeguards prevent accidental transactions:
 | **Weekly transaction limit** | Enforces 3/week cap; counts unique drop players (multiple bids against same drop = 1 slot) |
 | **FAAB budget caps** | Max single bid = 50% of remaining; hard cap at remaining budget |
 | **IL/IL+ compliance** | Auto-checks IL slots and resolves non-compliance before proceeding |
-| **Droppable list** | Only players in `DROPPABLE_PLAYERS` can be dropped |
+| **Droppable list** | Only auto-detected low-value players or manually configured `DROPPABLE_PLAYERS` can be dropped |
 | **Roster verification** | Confirms the drop player is actually on your roster |
 | **Player key validation** | Both add and drop player keys must resolve before proceeding |
 | **Explicit confirmation** | Prompts "Submit all claims? (yes/no)" before submitting any queued claims |
@@ -261,7 +319,7 @@ Several safeguards prevent accidental transactions:
 | Error | Cause | Fix |
 |-------|-------|-----|
 | "IL resolution failed" | Drop or roster move was rejected by Yahoo | Check the error details; the player may already be in a valid state |
-| "Could not find X on your roster" | Drop player name doesn't match any roster player | Check spelling in `DROPPABLE_PLAYERS`; names must match Yahoo's format |
+| "Could not find X on your roster" | Drop player name doesn't match any roster player | Check spelling in `DROPPABLE_PLAYERS` or `UNDDROPPABLE_PLAYERS`; names must match Yahoo's format |
 | "Could not find player key for X" | Add player not found in Yahoo's player pool | Verify the player name matches Yahoo's listing |
 | HTTP 401 | OAuth token expired or invalid | Delete `token.json` in project root and re-authenticate |
 | HTTP 403 | Insufficient API permissions | Verify your Yahoo Developer App has Fantasy Sports checked |
@@ -288,9 +346,11 @@ src/transactions.py
 │   └── submit_roster_move()             # PUT via yfpy OAuth
 ├── High-level flow
 │   ├── submit_add_drop()                # Resolve + build + submit
+│   ├── compute_roster_impact()          # Per-category z-delta for add/drop swap
 │   └── run_transaction_flow()           # Interactive multi-bid menu
 │       ├── IL auto-resolution           # Pre-flight fix for IL violations
 │       ├── FAAB analysis integration    # Inline bid suggestions
+│       ├── Roster impact preview        # Show z-delta before confirming swap
 │       ├── _unique_drops_used()         # Count unique drop players in queue
 │       ├── Multi-bid queue loop         # Queue multiple claims
 │       └── Batch submission             # Submit all claims sequentially
@@ -309,4 +369,6 @@ src/transactions.py
 - **yfpy is read-only:** yfpy itself has no write methods. This module works around that by directly accessing yfpy's internal OAuth session for POST requests.
 - **Waiver processing:** Submitting a claim doesn't guarantee the pickup. Yahoo processes waivers on its normal schedule (typically overnight). The claim enters the waiver queue.
 - **Multiple bids, same drop player:** You can drop the same player for different add targets. Yahoo processes claims in priority order — if the first claim wins, the rest are automatically voided. The tool correctly counts unique drop players rather than total bids when tracking your weekly transaction limit.
-- **Budget tracking:** The claim flow reads your remaining FAAB balance from Yahoo, displays budget status (FLUSH/HEALTHY/TIGHT/CRITICAL), and enforces bid caps based on remaining budget.
+- **Budget tracking:** The claim flow reads your remaining FAAB balance from Yahoo, displays budget status (FLEXIBLE/COMFORTABLE/MODERATE/CONSERVE), and enforces bid caps based on remaining budget.
+- **Roster-strength-aware bids:** FAAB bid suggestions factor in your roster’s overall strength (computed from average category z-scores). Weak rosters bid more aggressively; strong rosters bid conservatively. The roster strength label and z-score breakdown are displayed alongside budget status in the transaction flow.
+- **Color-coded output:** Injury statuses, z-scores, budget status, and roster strength are color-coded in the terminal output (green/yellow/red). Respects `NO_COLOR` env var.

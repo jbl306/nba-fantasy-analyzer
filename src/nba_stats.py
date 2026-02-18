@@ -392,6 +392,174 @@ def check_recent_activity(
     return results
 
 
+def compute_recent_game_stats(
+    player_ids: list[int],
+    last_n: int | None = None,
+) -> dict[int, dict]:
+    """Compute per-game averages from a player's last N games.
+
+    Returns a dict mapping player_id → {stat_col: avg_value, ...} for all
+    the 9-cat stat columns plus MIN.  The caller can then z-score these
+    against the league season averages to identify breakout performers.
+
+    Args:
+        player_ids: NBA player IDs to evaluate.
+        last_n: Number of recent games. Defaults to config.HOT_PICKUP_RECENT_GAMES.
+
+    Returns:
+        Dict of player_id → recent per-game averages dict.
+    """
+    if last_n is None:
+        last_n = config.HOT_PICKUP_RECENT_GAMES
+
+    season = get_season_string()
+    stat_cols = [
+        "MIN", "FGM", "FGA", "FG_PCT", "FTM", "FTA", "FT_PCT",
+        "FG3M", "PTS", "REB", "AST", "STL", "BLK", "TOV",
+    ]
+    results: dict[int, dict] = {}
+
+    for pid in player_ids:
+        try:
+            log = playergamelog.PlayerGameLog(
+                player_id=pid,
+                season=season,
+                timeout=30,
+            )
+            time.sleep(0.6)
+            df = log.get_data_frames()[0]
+
+            if df.empty or len(df) < 1:
+                continue
+
+            recent = df.head(last_n)
+            averages: dict[str, float] = {"games_used": len(recent)}
+
+            for col in stat_cols:
+                if col in recent.columns:
+                    averages[col] = float(recent[col].mean())
+
+            # Recompute FG% and FT% from totals (more accurate than avg of avgs)
+            fgm = recent.get("FGM")
+            fga = recent.get("FGA")
+            if fgm is not None and fga is not None:
+                total_fga = fga.sum()
+                averages["FG_PCT"] = (fgm.sum() / total_fga) if total_fga > 0 else 0.0
+            ftm = recent.get("FTM")
+            fta = recent.get("FTA")
+            if ftm is not None and fta is not None:
+                total_fta = fta.sum()
+                averages["FT_PCT"] = (ftm.sum() / total_fta) if total_fta > 0 else 0.0
+
+            results[pid] = averages
+        except Exception:
+            pass
+
+    return results
+
+
+def compute_hot_pickup_scores(
+    recent_stats: dict[int, dict],
+    season_df: pd.DataFrame,
+) -> dict[int, dict]:
+    """Score recent performance against season-wide league averages.
+
+    For each player with recent game stats, compute how their last-N-game
+    averages compare to the league-wide *season* averages using z-scores.
+    A high ``recent_z`` means the player is performing ABOVE their season
+    norm — a breakout signal.
+
+    Also computes a ``z_delta`` = recent_z − season_z for each player,
+    which captures improvement rather than just raw talent.
+
+    Args:
+        recent_stats: From :func:`compute_recent_game_stats`.
+        season_df: Full season DataFrame with z-scores (from build_player_stats_table).
+
+    Returns:
+        Dict of player_id → {recent_z_total, season_z_total, z_delta, is_hot}.
+    """
+    # Compute league-wide season means and stds for z-scoring recent stats
+    counting_cols = ["FG3M", "PTS", "REB", "AST", "STL", "BLK", "TOV"]
+    league_means: dict[str, float] = {}
+    league_stds: dict[str, float] = {}
+
+    for col in counting_cols:
+        if col in season_df.columns:
+            league_means[col] = float(season_df[col].mean())
+            league_stds[col] = float(season_df[col].std())
+
+    # Volume-weighted means for FG% and FT%
+    for pct_col, vol_col in [("FG_PCT", "FGA"), ("FT_PCT", "FTA")]:
+        if pct_col in season_df.columns and vol_col in season_df.columns:
+            pct = season_df[pct_col].astype(float)
+            vol = season_df[vol_col].astype(float)
+            avg_pct = pct.mean()
+            impact = vol * (pct - avg_pct)
+            league_means[f"{pct_col}_impact_mean"] = float(impact.mean())
+            league_stds[f"{pct_col}_impact_std"] = float(impact.std())
+            league_means[f"{pct_col}_avg"] = float(avg_pct)
+
+    punt_names = {c.upper() for c in config.PUNT_CATEGORIES}
+    results: dict[int, dict] = {}
+
+    # Build a quick PLAYER_ID → season Z_TOTAL lookup
+    season_z_lookup: dict[int, float] = {}
+    if "PLAYER_ID" in season_df.columns and "Z_TOTAL" in season_df.columns:
+        for _, row in season_df.iterrows():
+            season_z_lookup[int(row["PLAYER_ID"])] = float(row["Z_TOTAL"])
+
+    for pid, stats in recent_stats.items():
+        z_sum = 0.0
+        n_cats = 0
+
+        for stat_key, cat_info in config.STAT_CATEGORIES.items():
+            cat_name_upper = cat_info["name"].upper()
+            if cat_name_upper in punt_names:
+                continue
+
+            vol_col = cat_info.get("volume_col")
+
+            if vol_col and stat_key in stats:
+                # Volume-weighted impact z-score for %-based stats
+                pct_val = stats.get(stat_key, 0)
+                vol_val = stats.get(vol_col, 0)
+                avg_pct = league_means.get(f"{stat_key}_avg", 0)
+                impact = vol_val * (pct_val - avg_pct)
+                imp_mean = league_means.get(f"{stat_key}_impact_mean", 0)
+                imp_std = league_stds.get(f"{stat_key}_impact_std", 1)
+                if imp_std > 0:
+                    z = (impact - imp_mean) / imp_std
+                    if not cat_info["higher_is_better"]:
+                        z = -z
+                    z_sum += z
+                    n_cats += 1
+            elif stat_key in stats:
+                # Standard z-score for counting stats
+                val = stats[stat_key]
+                mean = league_means.get(stat_key, 0)
+                std = league_stds.get(stat_key, 1)
+                if std > 0:
+                    z = (val - mean) / std
+                    if not cat_info["higher_is_better"]:
+                        z = -z
+                    z_sum += z
+                    n_cats += 1
+
+        season_z = season_z_lookup.get(pid, 0.0)
+        z_delta = z_sum - season_z
+
+        results[pid] = {
+            "recent_z_total": round(z_sum, 2),
+            "season_z_total": round(season_z, 2),
+            "z_delta": round(z_delta, 2),
+            "games_used": stats.get("games_used", 0),
+            "is_hot": z_delta >= 1.0,  # performing 1+ z-score above season avg
+        }
+
+    return results
+
+
 def build_player_stats_table() -> pd.DataFrame:
     """Build a comprehensive player stats table with z-scores and availability.
 

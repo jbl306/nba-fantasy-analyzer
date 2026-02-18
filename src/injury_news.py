@@ -10,6 +10,7 @@ Source: https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries
 
 from datetime import datetime
 
+import re
 import requests
 
 import config
@@ -23,6 +24,11 @@ INJURY_SEVERITY = {
     "Out For Season": {
         "multiplier": 0.0,   # completely eliminate from recommendations
         "label": "OUT-SEASON",
+        "priority": 1,
+    },
+    "Suspended": {
+        "multiplier": 0.0,   # default for suspensions — adjusted by game count below
+        "label": "SUSP",
         "priority": 1,
     },
     "Out": {
@@ -49,6 +55,16 @@ EXTENDED_ABSENCE_KEYWORDS = [
     "indefinitely",
 ]
 
+# Suspension keywords in blurbs
+SUSPENSION_KEYWORDS = [
+    "suspended",
+    "suspension",
+    "banned",
+]
+
+# Minimum suspension games to treat as season-ending (0.0 multiplier)
+SUSPENSION_LONG_THRESHOLD = 10
+
 # Keywords that suggest a player is close to returning
 RETURN_SOON_KEYWORDS = [
     "return after the all-star break",
@@ -61,6 +77,32 @@ RETURN_SOON_KEYWORDS = [
     "day-to-day",
     "game-time decision",
 ]
+
+# Regex patterns for parsing suspension game counts from blurbs
+_SUSP_GAME_PATTERNS = [
+    re.compile(r"(\d+)\s*-?\s*game\s+suspension", re.IGNORECASE),
+    re.compile(r"suspend(?:ed)?\s+(?:for\s+)?(\d+)\s+game", re.IGNORECASE),
+    re.compile(r"(\d+)\s+game(?:s)?\s+(?:for|without\s+pay)", re.IGNORECASE),
+]
+
+
+def _parse_suspension_games(*texts: str) -> int | None:
+    """Extract the suspension length in games from blurb text(s).
+
+    Searches each text for patterns like "25-game suspension",
+    "suspended for 25 games", etc.
+
+    Returns:
+        Number of games if found, else None.
+    """
+    for text in texts:
+        if not text:
+            continue
+        for pattern in _SUSP_GAME_PATTERNS:
+            m = pattern.search(text)
+            if m:
+                return int(m.group(1))
+    return None
 
 
 def fetch_injury_report() -> list[dict]:
@@ -123,7 +165,7 @@ def fetch_injury_report() -> list[dict]:
             if fantasy_abbr == "OFS":
                 status = "Out For Season"
             elif raw_status == "Suspension" or type_abbr == "SUSP":
-                status = "Out"  # Treat suspensions as Out
+                status = "Suspended"
             elif raw_status.lower().startswith("day"):
                 status = "Day To Day"
             else:
@@ -160,7 +202,17 @@ def fetch_injury_report() -> list[dict]:
 
             # Adjust multiplier for nuanced cases
             multiplier = severity["multiplier"]
-            if status == "Out" and extended:
+
+            # --- Suspension: parse game count, defer multiplier to scorer ---
+            susp_games: int | None = None
+            if status == "Suspended":
+                susp_games = _parse_suspension_games(blurb, short_comment)
+                # Sentinel value: the scoring pipeline will compute
+                # the real multiplier using remaining-games context.
+                # Use -1.0 so score_available_players knows to override.
+                multiplier = -1.0
+
+            elif status == "Out" and extended:
                 multiplier = 0.05  # even harsher for confirmed long-term
             elif status == "Out" and returning:
                 multiplier = 0.40  # less penalty if return is imminent
@@ -178,6 +230,7 @@ def fetch_injury_report() -> list[dict]:
                 "severity_multiplier": multiplier,
                 "extended_absence": extended,
                 "return_soon": returning,
+                "suspension_games": susp_games,
             })
 
     print(f"  Found {len(injuries)} players on the injury report")

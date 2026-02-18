@@ -55,7 +55,7 @@ Week 2: Feb 23 – Mar 01
 
 ## Game Count Analysis
 
-For each upcoming week, the tool counts how many games each NBA team plays:
+For each upcoming week, the tool counts how many games each NBA team plays. **For the current week, only remaining games from today onward are counted** — games that have already been played are excluded, since they don't help a new pickup:", "oldString": "For each upcoming week, the tool counts how many games each NBA team plays:
 
 ```
 ────────────────────────────────────────

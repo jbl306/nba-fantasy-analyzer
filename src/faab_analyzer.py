@@ -503,6 +503,7 @@ def suggest_bid(
     budget_status: dict[str, Any] | None = None,
     schedule_games: int | None = None,
     avg_games: float = 3.5,
+    roster_strength: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Suggest a FAAB bid for a player based on historical data.
 
@@ -515,6 +516,10 @@ def suggest_bid(
 
     Schedule-aware: when schedule_games is provided, the bid is nudged
     higher for players with more upcoming games (more stat production).
+
+    Roster-strength-aware: when roster_strength is provided, bids are
+    adjusted based on how strong your roster is relative to the field.
+    Weak rosters bid more aggressively; strong rosters bid conservatively.
 
     Strategies:
       - "value":       Bid at the 25th percentile for the tier (bargain)
@@ -529,6 +534,7 @@ def suggest_bid(
         budget_status: Optional dict from compute_budget_status().
         schedule_games: Optional game count for the upcoming week.
         avg_games: League average games per week (for schedule scaling).
+        roster_strength: Optional dict from compute_roster_strength().
 
     Returns:
         Dict with suggested bid, reasoning, and optional premium_range.
@@ -572,9 +578,10 @@ def suggest_bid(
         else:
             bid = base
 
-        # Apply budget and schedule adjustments (low-confidence path)
+        # Apply budget, schedule, and roster strength adjustments (low-confidence path)
         bid = _apply_budget_schedule_adjustments(
             bid, budget_status, schedule_games, avg_games,
+            roster_strength=roster_strength,
         )
 
         suggestion["suggested_bid"] = bid
@@ -585,6 +592,8 @@ def suggest_bid(
         ]
         if budget_status:
             reason_parts.append(f" Budget: {budget_status['status']}.")
+        if roster_strength:
+            reason_parts.append(f" Roster: {roster_strength['label']}.")
         if schedule_games is not None:
             reason_parts.append(f" Games/wk: {schedule_games}.")
         suggestion["reason"] = "".join(reason_parts)
@@ -607,9 +616,10 @@ def suggest_bid(
     if tier_index == 0:  # Elite — bump up slightly
         bid = bid + max(1, int(round(bid * 0.1)))
 
-    # Apply budget and schedule adjustments
+    # Apply budget, schedule, and roster strength adjustments
     bid = _apply_budget_schedule_adjustments(
         int(bid), budget_status, schedule_games, avg_games,
+        roster_strength=roster_strength,
     )
 
     suggestion["suggested_bid"] = bid
@@ -619,7 +629,12 @@ def suggest_bid(
     # Append context to reason
     extras = []
     if budget_status:
-        extras.append(f"Budget: {budget_status['status']}")
+        rank = budget_status.get("league_rank")
+        size = budget_status.get("league_size")
+        rank_str = f" #{rank}/{size}" if rank and size else ""
+        extras.append(f"Budget: {budget_status['status']}{rank_str}")
+    if roster_strength:
+        extras.append(f"Roster: {roster_strength['label']}")
     if schedule_games is not None:
         extras.append(f"{schedule_games}G this week")
     if extras:
@@ -633,8 +648,14 @@ def _apply_budget_schedule_adjustments(
     budget_status: dict[str, Any] | None = None,
     schedule_games: int | None = None,
     avg_games: float = 3.5,
+    roster_strength: dict[str, Any] | None = None,
 ) -> int:
-    """Apply budget-factor and schedule-factor scaling to a raw bid."""
+    """Apply budget-factor, schedule-factor, and roster-strength scaling to a raw bid.
+
+    Roster strength adjustment:
+      - Weak roster → bid_factor > 1 → bid increases (be more aggressive)
+      - Strong roster → bid_factor < 1 → bid decreases (be selective)
+    """
     # Budget scaling
     if budget_status:
         factor = budget_status.get("budget_factor", 1.0)
@@ -650,6 +671,10 @@ def _apply_budget_schedule_adjustments(
         sched_factor = 1.0 + 0.15 * delta   # ±15% per game delta
         bid = int(bid * sched_factor)
 
+    # Roster strength scaling: weak roster → bid up, strong → bid down
+    if roster_strength:
+        bid = int(bid * roster_strength.get("bid_factor", 1.0))
+
     return max(1, bid)
 
 
@@ -661,6 +686,7 @@ def suggest_bids_for_recommendations(
     budget_status: dict[str, Any] | None = None,
     schedule_game_counts: dict[str, int] | None = None,
     avg_games: float = 3.5,
+    roster_strength: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Generate bid suggestions for the top N recommendations.
 
@@ -672,6 +698,7 @@ def suggest_bids_for_recommendations(
         budget_status: Optional budget health dict.
         schedule_game_counts: Optional {team_abbr: games} for the upcoming week.
         avg_games: League average games per week.
+        roster_strength: Optional roster strength dict for bid scaling.
 
     Returns:
         DataFrame with columns: Player, Adj_Score, Tier, Suggested_Bid, Confidence, Reason.
@@ -696,6 +723,7 @@ def suggest_bids_for_recommendations(
             budget_status=budget_status,
             schedule_games=sched_games,
             avg_games=avg_games,
+            roster_strength=roster_strength,
         )
         premium_range = sug.get("premium_range")
         premium_str = ""
@@ -888,6 +916,7 @@ def run_faab_analysis(
     budget_status: dict[str, Any] | None = None,
     schedule_game_counts: dict[str, int] | None = None,
     avg_games: float = 3.5,
+    roster_strength: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the full FAAB history analysis and print reports.
 
@@ -897,6 +926,7 @@ def run_faab_analysis(
         budget_status: Optional budget health dict (from league_settings).
         schedule_game_counts: Optional {team: games} for upcoming week.
         avg_games: League average games per week.
+        roster_strength: Optional roster strength dict for bid scaling.
 
     Returns:
         Analysis dict from analyze_bid_history.
@@ -922,6 +952,7 @@ def run_faab_analysis(
                 budget_status=budget_status,
                 schedule_game_counts=schedule_game_counts,
                 avg_games=avg_games,
+                roster_strength=roster_strength,
             )
             print(format_bid_suggestions(sug_df, strategy))
 

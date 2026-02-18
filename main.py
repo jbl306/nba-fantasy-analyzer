@@ -76,11 +76,43 @@ Examples:
         help="Analyze league FAAB bid history and show suggested bids",
     )
     parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Compact display: show only Player, Team, Z_Value, Adj_Score, Injury, Games_Wk",
+    )
+    parser.add_argument(
         "--strategy",
         type=str,
         choices=["value", "competitive", "aggressive"],
         default=None,
         help="FAAB bidding strategy: value (bargain), competitive (median), aggressive (ensure win)",
+    )
+    parser.add_argument(
+        "--list-leagues",
+        action="store_true",
+        help="Show all Yahoo Fantasy NBA leagues you belong to and exit",
+    )
+    parser.add_argument(
+        "--list-teams",
+        action="store_true",
+        help="Show all teams in your league with IDs and managers, then exit",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Streaming mode: find the best available player with a game today for your weakest roster spot",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Run analysis once and send results via email notification (designed for scheduled/cron use)",
+    )
+    parser.add_argument(
+        "--notify",
+        type=str,
+        choices=["email"],
+        default=None,
+        help="Notification method for --watch mode (default: email)",
     )
 
     args = parser.parse_args()
@@ -102,6 +134,23 @@ Examples:
         print("ERROR: --claim/--dry-run/--faab-history requires Yahoo integration (cannot use --skip-yahoo)")
         sys.exit(1)
 
+    # --stream requires Yahoo
+    if args.stream and args.skip_yahoo:
+        print("ERROR: --stream requires Yahoo integration (cannot use --skip-yahoo)")
+        sys.exit(1)
+
+    # --watch requires Yahoo and email config
+    if args.watch and args.skip_yahoo:
+        print("ERROR: --watch requires Yahoo integration (cannot use --skip-yahoo)")
+        sys.exit(1)
+    if args.watch:
+        from src.notifier import email_configured
+        if not email_configured():
+            print("ERROR: --watch requires email configuration in .env")
+            print("  Set NOTIFY_EMAIL_TO and NOTIFY_SMTP_PASSWORD")
+            print("  See docs/setup-guide.md for Gmail App Password instructions.")
+            sys.exit(1)
+
     # Validate Yahoo credentials if not skipping
     if not args.skip_yahoo:
         if not config.YAHOO_CONSUMER_KEY or config.YAHOO_CONSUMER_KEY == "your_consumer_key_here":
@@ -115,6 +164,81 @@ Examples:
             print("Or run with --skip-yahoo to see NBA stats rankings without Yahoo.")
             sys.exit(1)
 
+    # ---------------------------------------------------------------
+    # Discovery commands (--list-leagues, --list-teams) — run and exit
+    # ---------------------------------------------------------------
+    if args.list_leagues or args.list_teams:
+        from src.yahoo_fantasy import create_yahoo_query
+        print("\nConnecting to Yahoo Fantasy Sports...")
+        query = create_yahoo_query()
+
+        if args.list_leagues:
+            from src.yahoo_fantasy import list_user_leagues
+            leagues = list_user_leagues(query)
+            if not leagues:
+                print("\n  No NBA fantasy leagues found for this account.")
+            else:
+                print(f"\n  Your NBA Fantasy Leagues ({len(leagues)}):")
+                print(f"  {'ID':<8} {'Name':<35} {'Season':<8} {'Teams':<7} {'Scoring'}")
+                print(f"  {'─'*8} {'─'*35} {'─'*8} {'─'*7} {'─'*15}")
+                for lg in leagues:
+                    print(f"  {lg['league_id']:<8} {lg['name']:<35} {lg['season']:<8} {lg['num_teams']:<7} {lg['scoring_type']}")
+                print(f"\n  Set YAHOO_LEAGUE_ID in .env to use a league.")
+
+        if args.list_teams:
+            from src.yahoo_fantasy import list_league_teams
+            teams = list_league_teams(query)
+            if not teams:
+                print("\n  No teams found in this league.")
+            else:
+                print(f"\n  Teams in League {config.YAHOO_LEAGUE_ID} ({len(teams)}):")
+                print(f"  {'ID':<5} {'Team Name':<30} {'Manager':<20} {'Yours'}")
+                print(f"  {'─'*5} {'─'*30} {'─'*20} {'─'*5}")
+                for t in teams:
+                    marker = " ←" if t["is_my_team"] else ""
+                    print(f"  {t['team_id']:<5} {t['name']:<30} {t['manager']:<20}{marker}")
+                print(f"\n  Set YAHOO_TEAM_ID in .env to your team number.")
+        return
+
+    # ---------------------------------------------------------------
+    # Watch mode (--watch) — run analysis, email results, and exit
+    # ---------------------------------------------------------------
+    if args.watch:
+        from src.notifier import send_email_report
+        print()
+        print("=" * 70)
+        print("  NBA FANTASY ADVISOR - Watch Mode")
+        print(f"  League: {config.YAHOO_LEAGUE_ID} | Team: {config.YAHOO_TEAM_ID}")
+        print("=" * 70)
+        print()
+
+        result = run_waiver_analysis(
+            skip_yahoo=False,
+            return_data=True,
+            compact=False,
+        )
+
+        if result is not None and isinstance(result, tuple) and len(result) >= 2:
+            _query, rec_df = result[0], result[1]
+            schedule_analysis = result[3] if len(result) >= 4 else None
+            if rec_df is not None and not rec_df.empty:
+                top_n = config.TOP_N_RECOMMENDATIONS
+                print(f"\n  Sending email report (top {top_n} recommendations)...")
+                send_email_report(rec_df, schedule_analysis=schedule_analysis, top_n=top_n)
+            else:
+                print("  No recommendations to send.")
+        else:
+            print("  Analysis returned no data — cannot send report.")
+        return
+
+    # ---------------------------------------------------------------
+    # Streaming mode (--stream) — run and exit
+    # ---------------------------------------------------------------
+    if args.stream:
+        from src.waiver_advisor import run_streaming_analysis
+        run_streaming_analysis()
+        return
+
     print()
     print("=" * 70)
     print("  NBA FANTASY ADVISOR - Waiver Wire Recommendations")
@@ -125,7 +249,11 @@ Examples:
 
     # Run analysis — returns (query, rec_df, nba_stats, schedule_analysis) when claim/faab mode is requested
     need_data = args.claim or args.faab_history
-    result = run_waiver_analysis(skip_yahoo=args.skip_yahoo, return_data=need_data)
+    result = run_waiver_analysis(
+        skip_yahoo=args.skip_yahoo,
+        return_data=need_data,
+        compact=args.compact,
+    )
 
     # Unpack the expanded return tuple
     query = None
@@ -146,18 +274,31 @@ Examples:
     if query is not None and config.FAAB_ENABLED:
         try:
             from src.league_settings import (
-                fetch_league_settings, get_faab_balance, compute_budget_status,
+                fetch_league_settings, get_faab_balance,
+                get_all_faab_balances, compute_budget_status,
             )
             settings = fetch_league_settings(query)
             faab_balance = get_faab_balance(query)
             if faab_balance is None:
                 # Estimate from FAAB history if Yahoo doesn't expose the balance
                 faab_balance = config.FAAB_BUDGET_REGULAR_SEASON
+
+            # Fetch league-wide FAAB balances for relative ranking
+            league_balances: list[int] | None = None
+            try:
+                all_balances = get_all_faab_balances(query)
+                if all_balances:
+                    league_balances = [b["faab_balance"] for b in all_balances]
+            except Exception as e:
+                print(f"  Warning: could not fetch league FAAB balances: {e}")
+
             budget_status = compute_budget_status(
                 remaining_budget=faab_balance,
                 current_week=settings.get("current_week"),
                 end_week=settings.get("end_week"),
                 playoff_start_week=settings.get("playoff_start_week"),
+                start_week=settings.get("start_week"),
+                league_balances=league_balances,
             )
         except Exception as e:
             print(f"  Warning: budget computation failed: {e}")
@@ -165,6 +306,21 @@ Examples:
     if schedule_analysis and schedule_analysis.get("weeks"):
         schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
         avg_games = schedule_analysis.get("avg_games_per_week", 3.5)
+
+    # Compute roster strength for FAAB bid adjustments
+    roster_strength = None
+    if rec_df is not None and nba_stats is not None:
+        try:
+            from src.waiver_advisor import (
+                analyze_roster, identify_team_needs, compute_roster_strength,
+            )
+            from src.yahoo_fantasy import get_my_team_roster
+            my_roster = get_my_team_roster(query)
+            roster_df = analyze_roster(my_roster, nba_stats)
+            team_needs = identify_team_needs(roster_df)
+            roster_strength = compute_roster_strength(team_needs)
+        except Exception as e:
+            print(f"  Warning: roster strength computation failed: {e}")
 
     # FAAB history analysis
     faab_analysis = None
@@ -175,6 +331,7 @@ Examples:
             budget_status=budget_status,
             schedule_game_counts=schedule_game_counts,
             avg_games=avg_games,
+            roster_strength=roster_strength,
         )
 
     # If claim mode, launch the transaction flow
@@ -186,6 +343,7 @@ Examples:
             budget_status=budget_status,
             schedule_analysis=schedule_analysis,
             nba_stats=nba_stats,
+            roster_strength=roster_strength,
         )
 
 

@@ -290,10 +290,14 @@ def build_schedule_analysis(
 
     total_counts: dict[str, int] = defaultdict(int)
     week_analyses: list[dict] = []
+    today = date.today()
 
-    for monday, sunday, label in weeks:
-        counts = get_team_game_counts(schedule, monday, sunday)
-        dates = get_team_game_dates(schedule, monday, sunday)
+    for i, (week_start, sunday, label) in enumerate(weeks):
+        # For the current week (index 0), count only remaining games
+        # from today onward — games already played don't help a pickup.
+        effective_start = max(week_start, today) if i == 0 else week_start
+        counts = get_team_game_counts(schedule, effective_start, sunday)
+        dates = get_team_game_dates(schedule, effective_start, sunday)
 
         for team, count in counts.items():
             total_counts[team] += count
@@ -301,7 +305,7 @@ def build_schedule_analysis(
         count_vals = list(counts.values()) or [0]
         week_analyses.append({
             "label": label,
-            "start": monday,
+            "start": week_start,
             "end": sunday,
             "game_counts": counts,
             "game_dates": dates,
