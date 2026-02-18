@@ -172,7 +172,7 @@ When suggesting a bid for a waiver candidate, the analyzer maps the player's `Ad
 The analyzer computes a **budget factor** based on your remaining FAAB balance:
 
 $$
-\text{budget\_factor} = \frac{\text{weekly\_budget}}{\text{ideal\_weekly\_budget}}
+\textit{budgetFactor} = \frac{\textit{weeklyBudget}}{\textit{idealWeeklyBudget}}
 $$
 
 Where `weekly_budget = remaining / weeks_remaining` and `ideal_weekly_budget = total_budget / total_weeks`.
@@ -193,7 +193,7 @@ The bid is multiplied by the budget factor, so a $10 base bid with a TIGHT budge
 The analyzer also adjusts bids based on how many games the player's team plays in the upcoming fantasy week:
 
 $$
-\text{schedule\_factor} = 1.0 + 0.15 \times (\text{games} - \text{avg\_games})
+\textit{scheduleFactor} = 1.0 + 0.15 \times (\textit{games} - \textit{avgGames})
 $$
 
 This provides a ±15% adjustment per game above or below the league average:
@@ -212,7 +212,7 @@ Players with more remaining games this week provide more stat production opportu
 The analyzer also adjusts bids based on your overall roster strength relative to the field. This is computed from the average z-score across your non-punt categories:
 
 $$
-\text{bid\_factor} = 1.0 - 0.15 \times \text{avg\_z}
+\textit{bidFactor} = 1.0 - 0.15 \times \textit{avgZ}
 $$
 
 Clamped to [0.7, 1.3]:

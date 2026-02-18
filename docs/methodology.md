@@ -160,17 +160,17 @@ For turnovers, the z-score is **inverted** (multiplied by -1) since fewer turnov
 Raw shooting percentages are misleading in H2H because a player's contribution to your team's FG% or FT% depends on both **accuracy** and **attempt volume**. In H2H matchups, your team's FG% is calculated as:
 
 $$
-\text{Team FG\%} = \frac{\sum \text{FGM}}{\sum \text{FGA}}
+\text{Team FG}\% = \frac{\sum \text{FGM}}{\sum \text{FGA}}
 $$
 
 A player shooting .650 on 2 FGA/game barely moves the needle, while a player shooting .520 on 16 FGA/game dominates the denominator. To capture this, FG% and FT% use **impact-based z-scores**:
 
 $$
-\text{impact}_i = \text{FGA}_i \times (\text{FG\%}_i - \overline{\text{FG\%}})
+\textit{impact}_i = \text{FGA}_i \times (\text{FG}\%_i - \overline{\text{FG}\%})
 $$
 
 $$
-z_{FG\%} = \frac{\text{impact}_i - \mu_{\text{impact}}}{\sigma_{\text{impact}}}
+z_{\text{FG}\%} = \frac{\textit{impact}_i - \mu_{\textit{impact}}}{\sigma_{\textit{impact}}}
 $$
 
 The same approach applies to FT% using FTA as the volume weight. This ensures that high-volume efficient shooters are properly rewarded and low-volume outliers are not overvalued.
@@ -313,7 +313,7 @@ This is critical because a player like Jaren Jackson Jr. may have an 80%+ GP rat
 Suspended players receive a context-aware multiplier based on their team's remaining fantasy-season games rather than a static penalty. The suspension game count is parsed from the ESPN blurb text (e.g., "25-game suspension").
 
 $$
-\text{avail\_frac} = \frac{\max(\text{remaining\_games} - \text{suspension\_games}, 0)}{\text{remaining\_games}}
+\textit{availFrac} = \frac{\max(\textit{remainingGames} - \textit{suspensionGames},\; 0)}{\textit{remainingGames}}
 $$
 
 | Games Available / Remaining | Multiplier | Meaning |

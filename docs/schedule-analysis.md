@@ -87,7 +87,7 @@ The schedule multiplier adjusts a player's `Adj_Score` based on their team's gam
 When multiple weeks of schedule data are available, the multiplier uses an **exponential decay** so the current week matters most and future weeks matter progressively less:
 
 $$
-\textit{weighted\_delta} = \frac{\sum_{i=0}^{N-1} \lambda^{i} \cdot (g_i - \bar{g}_i)}{\sum_{i=0}^{N-1} \lambda^{i}}
+\textit{weightedDelta} = \frac{\sum_{i=0}^{N-1} \lambda^{i} \cdot (g_i - \bar{g}_i)}{\sum_{i=0}^{N-1} \lambda^{i}}
 $$
 
 Where $\lambda$ = `SCHEDULE_WEEK_DECAY` (default 0.5), $g_i$ is the team's game count for week $i$, and $\bar{g}_i$ is the league average for that week.
@@ -101,13 +101,13 @@ Where $\lambda$ = `SCHEDULE_WEEK_DECAY` (default 0.5), $g_i$ is the team's game 
 | | | | | **Sum = 1.50** | **-0.250** |
 
 $$
-\textit{weighted\_delta} = -0.250 / 1.50 = -0.167
+\textit{weightedDelta} = -0.250 / 1.50 = -0.167
 $$
 
 The final multiplier is then:
 
 $$
-\textit{schedule\_mult} = 1.0 + \textit{SCHEDULE\_WEIGHT} \times \textit{weighted\_delta}
+\textit{scheduleMult} = 1.0 + \textit{scheduleWeight} \times \textit{weightedDelta}
 $$
 
 ### Single-Week Fallback
@@ -115,7 +115,7 @@ $$
 When only one week is available, the formula simplifies to the original:
 
 $$
-\textit{schedule\_mult} = 1.0 + \textit{SCHEDULE\_WEIGHT} \times (\textit{games} - \textit{avg\_games})
+\textit{scheduleMult} = 1.0 + \textit{scheduleWeight} \times (\textit{games} - \textit{avgGames})
 $$
 
 With `SCHEDULE_WEIGHT = 0.10` (default):
@@ -130,7 +130,7 @@ With `SCHEDULE_WEIGHT = 0.10` (default):
 This is applied multiplicatively with all other score factors (needs, availability, injury):
 
 $$
-\textit{Adj\_Score} = \textit{Need\_Score} \times M_{\text{avail}} \times M_{\text{injury}} \times M_{\text{schedule}}
+\textit{AdjScore} = \textit{NeedScore} \times M_{\text{avail}} \times M_{\text{injury}} \times M_{\text{schedule}}
 $$
 
 ---
@@ -140,7 +140,7 @@ $$
 The schedule report includes a head-to-head comparison of waiver targets against your droppable players, using projected weekly z-value:
 
 $$
-\textit{Weekly\_Value} = \textit{Z\_per\_game} \times \textit{games\_this\_week}
+\textit{WeeklyValue} = \textit{ZperGame} \times \textit{gamesThisWeek}
 $$
 
 Where `Z_per_game = Z_Value / GP * team_GP_rate` is the player's per-game z-score contribution.
@@ -180,7 +180,7 @@ This helps answer the question: "Is this waiver pickup actually better than my w
 Beyond the score multiplier, the schedule also directly influences FAAB bid amounts:
 
 $$
-\textit{schedule\_factor} = 1.0 + 0.15 \times (\textit{games} - \textit{avg\_games})
+\textit{scheduleFactor} = 1.0 + 0.15 \times (\textit{games} - \textit{avgGames})
 $$
 
 This is a stronger adjustment than the score multiplier (±15% per game vs. ±10%) because FAAB bids should more aggressively account for immediate weekly value.
