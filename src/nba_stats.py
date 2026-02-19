@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 
 import pandas as pd
+from requests.exceptions import ReadTimeout, ConnectionError as ReqConnectionError
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
     leaguegamelog,
@@ -19,6 +20,46 @@ from nba_api.stats.static import players as nba_players
 from nba_api.stats.static import teams as nba_teams
 
 import config
+
+
+# ---------------------------------------------------------------------------
+# Retry helper for nba_api calls (stats.nba.com throttles datacenter IPs)
+# ---------------------------------------------------------------------------
+
+def _nba_api_call(fn, *args, retries: int = 3, base_timeout: int = 60, **kwargs):
+    """Call an nba_api endpoint constructor with retry + exponential backoff.
+
+    stats.nba.com frequently times out from cloud hosts (GitHub Actions, etc.).
+    This retries with increasing timeouts (60s → 120s → 180s) and a backoff
+    delay between attempts.
+
+    Args:
+        fn: The nba_api endpoint class (e.g., ``leaguedashplayerstats.LeagueDashPlayerStats``).
+        *args: Positional args forwarded to the endpoint constructor.
+        retries: Number of attempts before giving up.
+        base_timeout: Starting timeout in seconds (doubled each retry).
+        **kwargs: Keyword args forwarded to the endpoint constructor.
+
+    Returns:
+        The constructed endpoint object (call ``.get_data_frames()`` on it).
+    """
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        timeout = base_timeout * attempt
+        try:
+            result = fn(*args, timeout=timeout, **kwargs)
+            time.sleep(0.6)  # respect rate limits
+            return result
+        except (ReadTimeout, ReqConnectionError, TimeoutError, OSError) as exc:
+            last_exc = exc
+            if attempt < retries:
+                wait = 3 * attempt
+                print(f"    ⚠ stats.nba.com timeout (attempt {attempt}/{retries}), "
+                      f"retrying in {wait}s with {timeout * 2}s timeout...")
+                time.sleep(wait)
+            else:
+                print(f"    ✗ stats.nba.com failed after {retries} attempts")
+    raise last_exc  # type: ignore[misc]
 
 
 def get_all_active_players() -> list[dict]:
@@ -65,12 +106,11 @@ def get_league_dash_player_stats(
         season = get_season_string()
 
     print(f"  Fetching league-wide player stats for {season} ({per_mode})...")
-    stats = leaguedashplayerstats.LeagueDashPlayerStats(
+    stats = _nba_api_call(
+        leaguedashplayerstats.LeagueDashPlayerStats,
         season=season,
         per_mode_detailed=per_mode,
-        timeout=60,
     )
-    time.sleep(0.6)  # respect rate limits
     df = stats.get_data_frames()[0]
     return df
 
@@ -93,12 +133,11 @@ def get_player_game_log(
     if season is None:
         season = get_season_string()
 
-    log = playergamelog.PlayerGameLog(
+    log = _nba_api_call(
+        playergamelog.PlayerGameLog,
         player_id=player_id,
         season=season,
-        timeout=60,
     )
-    time.sleep(0.6)
     df = log.get_data_frames()[0]
 
     if last_n_games > 0:
@@ -109,11 +148,10 @@ def get_player_game_log(
 
 def get_todays_games() -> pd.DataFrame:
     """Get today's NBA scoreboard."""
-    board = scoreboardv2.ScoreboardV2(
+    board = _nba_api_call(
+        scoreboardv2.ScoreboardV2,
         game_date=datetime.now().strftime("%Y-%m-%d"),
-        timeout=60,
     )
-    time.sleep(0.6)
     return board.get_data_frames()[0]
 
 
@@ -241,12 +279,11 @@ def get_team_games_played() -> int:
     # (teams in the NBA play roughly the same number of games at any point)
     season = get_season_string()
     try:
-        stats = leaguedashplayerstats.LeagueDashPlayerStats(
+        stats = _nba_api_call(
+            leaguedashplayerstats.LeagueDashPlayerStats,
             season=season,
             per_mode_detailed="PerGame",
-            timeout=60,
         )
-        time.sleep(0.6)
         df = stats.get_data_frames()[0]
         return int(df["GP"].max())
     except Exception:
@@ -337,12 +374,11 @@ def check_recent_activity(
 
     for pid in player_ids:
         try:
-            log = playergamelog.PlayerGameLog(
+            log = _nba_api_call(
+                playergamelog.PlayerGameLog,
                 player_id=pid,
                 season=season,
-                timeout=30,
             )
-            time.sleep(0.6)  # rate limit
             df = log.get_data_frames()[0]
 
             if df.empty:
@@ -421,12 +457,11 @@ def compute_recent_game_stats(
 
     for pid in player_ids:
         try:
-            log = playergamelog.PlayerGameLog(
+            log = _nba_api_call(
+                playergamelog.PlayerGameLog,
                 player_id=pid,
                 season=season,
-                timeout=30,
             )
-            time.sleep(0.6)
             df = log.get_data_frames()[0]
 
             if df.empty or len(df) < 1:
