@@ -299,7 +299,6 @@ python main.py --skip-yahoo --top 25
 | `--compact` | off | Show condensed table: Player, Team, `Games_Wk`, Injury, `Z_Value`, `Adj_Score` only |
 | `--faab-history` | off | Analyze league FAAB bid history and show suggested bids for all strategies |
 | `--strategy` | `competitive` | Override FAAB bidding strategy: `value`, `competitive`, or `aggressive` |
-| `--stream` | off | Streaming mode: find the best available player with a game tomorrow for your weakest roster spot |
 | `--list-leagues` | off | Show all Yahoo Fantasy NBA leagues you belong to and exit |
 | `--list-teams` | off | Show all teams in your league with IDs and managers, then exit |
 
@@ -426,48 +425,3 @@ When submitting a waiver claim (`--claim` or `--dry-run`), a roster impact previ
 - Each category shows the z-score change (`add_z` − `drop_z`).
 - Green values (≥ +0.3) indicate meaningful improvement; red (≤ −0.3) indicate regression.
 - The net z-score summarises the total impact of the swap across all non-punt categories.
-
----
-
-## 10. Streaming Mode (`--stream`)
-
-Streaming mode finds the best available player with a game **tomorrow** and recommends them as a daily add/drop (designed for overnight FAAB auction leagues):
-
-```bash
-python main.py --stream
-```
-
-### How it works
-
-1. Fetches tomorrow's NBA schedule to identify which teams play.
-2. Filters the waiver pool to only players on teams with a game tomorrow.
-3. Analyzes your roster to identify your weakest spot (lowest z-score player).
-4. Checks IL/IL+ compliance — evaluates whether a recovered IL player should be activated as a roster upgrade.
-5. Scores streaming candidates using the same need-weighted algorithm.
-6. Shows the top picks with a roster impact preview for the #1 recommendation.
-
-### Example output
-
-```
-======================================================================
-  STREAMING ADVISOR — Wednesday January 15, 2025
-======================================================================
-
-  8 games tomorrow — 16 teams playing
-  42 available players with a game tomorrow
-
-  Weakest roster spot: Kevin Love (z-score: -1.24)
-  Target categories: STL, REB, BLK
-
-==========================================================================================
-BEST STREAMING PICKUPS FOR TOMORROW (Jan 16)
-==========================================================================================
-
- Rank  Player            Team  Injury  FG%    FT%    3PM   PTS   REB   AST   STL  BLK  TO   Z_Value  Adj_Score
-─────  ────────────────  ────  ──────  ─────  ─────  ────  ────  ────  ────  ───  ───  ───  ───────  ─────────
-    1  Paul Reed         PHI   -       0.524  0.712  0.2   12.1  8.3   1.5   1.1  1.4  1.2    +3.82     +5.14
-    ...
-
-  Suggested move: ADD Paul Reed / DROP Kevin Love
-  Roster impact:  FG% +0.1, REB +1.2, STL +0.3, BLK +0.8  →  net +2.1 z-score
-```

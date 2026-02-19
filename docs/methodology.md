@@ -54,15 +54,12 @@ The recommendation engine runs a multi-step pipeline, with optional FAAB analysi
 │  8. Transaction submission (optional, --claim)   │
 │     Multi-bid add/drop with roster impact preview│
 ├──────────────────────────────────────────────────┤
-│  S. Streaming mode (optional, --stream)          │
-│     Best pickup with a game TOMORROW             │
-├──────────────────────────────────────────────────┤
 │  D. League discovery (--list-leagues/--list-teams)│
 │     Show leagues, teams, IDs                     │
 └──────────────────────────────────────────────────┘
 ```
 
-Steps 7, 8, S, and D are optional modes. See [FAAB Bid Analysis](faab-analysis.md) and [Transactions](transactions.md) for details.
+Steps 7, 8, and D are optional modes. See [FAAB Bid Analysis](faab-analysis.md) and [Transactions](transactions.md) for details.
 
 ## Step 1 — Yahoo Fantasy Connection
 
@@ -489,26 +486,9 @@ Players are sorted by `Adj_Score` descending. The top N (default: 15) are displa
 
 ---
 
-## Streaming Mode
-
-Streaming mode (`--stream`) is a specialised analysis for daily add/drop strategies. Instead of recommending the overall best waiver pickups, it focuses on finding the best available player **with a game tomorrow**. This targets the next day's slate because overnight FAAB auction leagues do not allow same-day pickups.
-
-### Flow
-
-1. Fetch tomorrow's NBA schedule to identify which teams play
-2. Filter the waiver pool to only players on teams with a game tomorrow
-3. Analyse your roster to identify the weakest spot (lowest z-score player)
-4. Check IL/IL+ compliance — if a recovered IL player is close in z-score to your worst regular player, recommend activating them as a roster upgrade instead of streaming
-5. Score streaming candidates using the same need-weighted algorithm (without schedule multiplier, since all candidates have exactly 1 game tomorrow)
-6. Show the top picks with a roster impact preview for the #1 recommendation
-
-This is designed for managers who aggressively stream their bottom roster spot to maximise weekly counting stats.
-
----
-
 ## Roster Impact Preview
 
-Before confirming a waiver claim (in `--claim` or `--dry-run` mode) and in streaming mode, a roster impact preview shows the per-category z-score delta:
+Before confirming a waiver claim (in `--claim` or `--dry-run` mode), a roster impact preview shows the per-category z-score delta:
 
 $$
 \Delta z_c = z_{\text{add},c} - z_{\text{drop},c}

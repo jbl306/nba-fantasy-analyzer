@@ -125,12 +125,6 @@ python main.py --skip-yahoo
 python main.py --top 25
 ```
 
-### Streaming mode (best pickup with a game tomorrow)
-
-```bash
-python main.py --stream
-```
-
 ### Watch mode (scheduled email report)
 
 ```bash
@@ -151,7 +145,6 @@ python main.py --list-teams               # Show all teams in your configured le
 ```bash
 python main.py --skip-yahoo --top 30
 python main.py --compact                  # Condensed table output
-python main.py --stream --compact          # Streaming in compact mode
 ```
 
 > **Auto-detect:** League settings (stat categories, roster slots, FAAB mode, transaction limits) are automatically read from the Yahoo API on each run and override `config.py` defaults. Use `--list-leagues` and `--list-teams` to find the correct IDs for your `.env` file.
@@ -245,7 +238,6 @@ All configuration lives in `config.py` and can be adjusted:
 | `--faab-history` | Fetch FAAB bid history for smart suggestions |
 | `--strategy S` | FAAB strategy: `value`, `competitive`, `aggressive` |
 | `--days N` | Schedule analysis window in days |
-| `--stream` | Streaming mode — best pickup with a game tomorrow (overnight FAAB) |
 | `--watch` | Run analysis once and email results (for scheduled/cron use) |
 | `--list-leagues` | Show all your NBA fantasy leagues and exit |
 | `--list-teams` | Show all teams in your league and exit |
@@ -283,19 +275,27 @@ Runs on GitHub's servers at 11 PM ET every night — your laptop can be off.
    ```
    This creates the OAuth tokens in your `.env` file.
 
-3. **Add secrets** in your GitHub repo → Settings → Secrets and variables → Actions:
+3. **Add secrets and variables** in your GitHub repo → Settings → Secrets and variables → Actions:
+
+   **Secrets tab:**
 
    | Secret | Value |
    |--------|-------|
    | `YAHOO_CONSUMER_KEY` | Your Yahoo app key |
    | `YAHOO_CONSUMER_SECRET` | Your Yahoo app secret |
-   | `YAHOO_LEAGUE_ID` | Your league ID (e.g., `94443`) |
-   | `YAHOO_TEAM_ID` | Your team number (e.g., `9`) |
    | `YAHOO_ACCESS_TOKEN` | From `.env` after OAuth |
    | `YAHOO_REFRESH_TOKEN` | From `.env` after OAuth |
    | `YAHOO_TOKEN_TYPE` | Usually `bearer` |
-   | `NOTIFY_EMAIL_TO` | Your email address |
+   | `YAHOO_TEAM_ID` | Your team number (e.g., `9`) — for nightly-watch only |
+   | `NOTIFY_EMAIL_TO` | Your email address — for nightly-watch only |
    | `NOTIFY_SMTP_PASSWORD` | Gmail App Password |
+
+   **Variables tab:**
+
+   | Variable | Value |
+   |----------|-------|
+   | `YAHOO_LEAGUE_ID` | Your league ID (e.g., `94443`) |
+   | `NOTIFY_EMAIL_FROM` | Your Gmail address (the one with the App Password) |
 
 4. **Enable the workflow** in the Actions tab
 

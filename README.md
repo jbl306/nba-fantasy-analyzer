@@ -15,7 +15,6 @@ Combines **Yahoo Fantasy API** (player stats via yfpy) with **ESPN public APIs**
 - Submit waiver claims and FAAB bids directly to Yahoo (with manual fallback when write access is unavailable)
 - Auto-resolve IL/IL+ roster moves with smart drop strategies
 - Scheduled watch mode with email reports via GitHub Actions
-- Streaming mode targeting tomorrow's games (designed for overnight FAAB leagues)
 
 ## Setup
 
@@ -75,10 +74,8 @@ python main.py --dry-run                   # Preview a claim without submitting
 python main.py --faab-history              # Analyze league FAAB bid history
 python main.py --strategy aggressive       # FAAB bidding strategy (value|competitive|aggressive)
 python main.py --compact                   # Compact table: Player, Team, Z, Score, Injury, Schedule
-python main.py --stream                    # Streaming mode: best pickup with a game tomorrow
-python main.py --stream --dry-run          # Preview streaming picks without submitting
 python main.py --watch                     # Run full analysis and email the report
-python main.py --stream --watch            # Run streaming analysis and email the report
+python main.py --team 3                    # Run analysis as team #3 instead of your default team
 python main.py --list-leagues              # Show all your Yahoo Fantasy NBA leagues
 python main.py --list-teams                # Show all teams in your league
 python main.py --skip-yahoo --top 30
@@ -95,17 +92,16 @@ python main.py --skip-yahoo --top 30
 7. **Hot Pickup Detection**: Fetches recent game logs (last 3 games) and computes z-score deltas to identify breakout performers. Players trending upward get a recency boost in scoring.
 8. **Trending Players**: Pulls Yahoo ownership-change data (percent-owned delta) to flag players being widely added across leagues. Trending players get an additional scoring boost.
 9. **Player News Analysis**: Scans ESPN injury blurbs, Yahoo player-note flags, ESPN general news, and ESPN scoreboard game leaders for role/performance keywords (starting lineup changes, breakout games, return timelines, suspensions). Applies a news multiplier to the scoring formula.
-9. **FAAB Bidding**: Analyzes league bid history (IQR outlier detection) and suggests bids using league-relative tiering, adjusted for roster strength
-10. **Color-Coded Output**: ANSI color-coded terminal output — green (Healthy/STRONG), yellow (DTD/Below Avg), red (OUT/WEAK) — with `NO_COLOR` support
-11. **Compact Mode**: `--compact` flag shows a condensed table (Player, Team, Z_Value, Adj_Score, Injury, Games_Wk)
-12. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, hot-pickup indicators, and schedule data
-13. **Auto-Detect League Settings**: On startup, reads Yahoo API league metadata (stat categories, roster positions, FAAB/waiver type, transaction limits) and auto-overrides config defaults — no manual tuning needed.
-14. **League & Team Discovery**: `--list-leagues` shows all Yahoo Fantasy NBA leagues you belong to; `--list-teams` lists every team in the current league with IDs and manager names.
-15. **Roster Impact Preview**: Before confirming a waiver claim, shows the per-category z-score delta (ADD vs. DROP) so you can see exactly which categories improve or regress.
-16. **Streaming Mode**: `--stream` finds the best available waiver pickup whose team plays *tomorrow* (for overnight FAAB leagues), identifies your weakest roster spot, and shows the roster impact of the swap.
-17. **IL/IL+ Smart Resolution**: In claim mode, drops the IL player directly to preserve all droppable players for bids. In streaming mode, compares z-scores — if the recovered IL player is close to (or better than) the worst roster player, keeps the IL player as a roster upgrade instead.
+10. **FAAB Bidding**: Analyzes league bid history (IQR outlier detection) and suggests bids using league-relative tiering, adjusted for roster strength
+11. **Color-Coded Output**: ANSI color-coded terminal output — green (Healthy/STRONG), yellow (DTD/Below Avg), red (OUT/WEAK) — with `NO_COLOR` support
+12. **Compact Mode**: `--compact` flag shows a condensed table (Player, Team, Z_Value, Adj_Score, Injury, Games_Wk)
+13. **Output**: Ranked table of recommended pickups with stats, z-scores, injury status, hot-pickup indicators, and schedule data
+14. **Auto-Detect League Settings**: On startup, reads Yahoo API league metadata (stat categories, roster positions, FAAB/waiver type, transaction limits) and auto-overrides config defaults — no manual tuning needed.
+15. **League & Team Discovery**: `--list-leagues` shows all Yahoo Fantasy NBA leagues you belong to; `--list-teams` lists every team in the current league with IDs and manager names.
+16. **Roster Impact Preview**: Before confirming a waiver claim, shows the per-category z-score delta (ADD vs. DROP) so you can see exactly which categories improve or regress.
+17. **IL/IL+ Smart Resolution**: In claim mode, drops the IL player directly to preserve all droppable players for bids.
 18. **Manual Fallback**: If your Yahoo app lacks write scope (Read/Write), the tool detects the 401 scope error on the first submission attempt and prints a step-by-step **Manual Action Plan** with exact player names, FAAB bids, and Yahoo UI instructions for all queued claims.
-19. **Watch Mode & Email Reports**: `--watch` runs the analysis and emails an HTML report (with color-coded injury badges and score highlights). `--stream --watch` does the same for streaming picks. Designed for GitHub Actions nightly automation.
+19. **Watch Mode & Email Reports**: `--watch` runs the analysis and emails an HTML report (with color-coded injury badges and score highlights) that includes your fantasy team name in the subject. Designed for GitHub Actions nightly automation.
 
 ## Project Structure
 
@@ -123,7 +119,6 @@ nba-fantasy-advisor/
 │   ├── waiver_advisor.py   # Recommendation engine (need-weighted + recency/trending/news boosts)
 │   ├── injury_news.py      # Injury report via ESPN JSON API
 │   ├── player_news.py      # Player news keyword analysis (ESPN blurbs + scoreboard standouts)
-│   ├── nba_stats.py        # Legacy NBA stats module (no longer imported)
 │   ├── schedule_analyzer.py # NBA schedule & games-per-week analysis
 │   ├── faab_analyzer.py    # FAAB bid history & suggested bids
 │   ├── league_settings.py  # Yahoo league settings, FAAB balance, budget tracking
@@ -133,7 +128,7 @@ nba-fantasy-advisor/
 ├── .github/
 │   └── workflows/
 │       ├── nightly-watch.yml   # Nightly waiver report (11 PM ET)
-│       └── daily-stream.yml    # Daily streaming picks (12:30 AM ET)
+│       └── league-advisor.yml  # On-demand league-wide advisor (pick your team)
 └── docs/
     ├── methodology.md      # Scoring model & algorithm details
     ├── setup-guide.md      # Installation & configuration
@@ -195,7 +190,6 @@ nba-fantasy-advisor/
 - **Yahoo trending integration**: Queries Yahoo ownership-change data in batches. Players gaining ≥ 5% ownership are flagged as 📈 Trending. Trending boost = `TRENDING_WEIGHT × min(delta/10, 3.0)` (additive to Adj_Score).
 - **Player news analysis**: Mines ESPN injury blurbs, general news articles, Yahoo `has_recent_player_notes` flags, and ESPN boxscores for 50+ keyword patterns across 13 signal categories (starting lineup, starting tomorrow, breakout, returning, expanded role, benched, traded, suspended, sitting tomorrow, etc.). Each keyword applies a multiplier (0.0 to 1.15) to the player's adjusted score. ESPN boxscores also detect "Recent Starter" signals and waiver-calibrated standout performances (15+ PTS, 8+ REB, 6+ AST, 3+ STL, 3+ BLK, 4+ 3PM).
 - **Auto-detect league settings**: On startup, `apply_yahoo_settings()` reads the Yahoo API response and patches `WEEKLY_TRANSACTION_LIMIT`, `FAAB_ENABLED`, validates 9-cat stat categories, and reports roster slot counts — so your config matches your league automatically.
-- **Streaming mode**: `--stream` fetches tomorrow's NBA schedule and filters the waiver pool to only players with a game tomorrow (designed for overnight FAAB auction leagues). Ranks them using the same need-weighted scoring. Shows your weakest roster spot and the roster impact of the top suggested swap. Also checks IL/IL+ compliance and may recommend activating a recovered IL player as the day's roster upgrade.
-- **IL/IL+ smart resolution**: Two strategies based on context. **Claim flow** (`--claim`/`--dry-run`): drops the IL player directly — clears the violation and frees a roster spot without consuming any droppable players. **Streaming flow** (`--stream`): compares the IL player's z-score with the worst regular roster player — if close enough (`IL_SMART_DROP_Z_THRESHOLD`, default 0.5), drops the regular player and activates the IL player as a roster upgrade.
+- **IL/IL+ smart resolution**: In claim mode (`--claim`/`--dry-run`), drops the IL player directly — clears the violation and frees a roster spot without consuming any droppable players.
 - **Manual fallback for read-only apps**: Yahoo's Developer Console currently only shows a "Read" toggle for Fantasy Sports. When API writes fail with a scope error, the tool automatically prints a Manual Action Plan with step-by-step Yahoo UI instructions for all queued claims (including IL resolution steps and FAAB bids). No code changes needed when write access is granted later.
-- **Watch mode & email**: `--watch` sends an HTML email report after analysis. `--stream --watch` sends a streaming picks email. Uses Gmail SMTP with App Passwords. Designed for GitHub Actions cron automation (see `.github/workflows/`).
+- **Watch mode & email**: `--watch` sends an HTML email report after analysis. Email subjects include the fantasy team name (e.g., "🏀 Waiver Wire Report — Feb 19 [jbl]"). Uses Gmail SMTP with App Passwords. Designed for GitHub Actions cron automation (see `.github/workflows/`).

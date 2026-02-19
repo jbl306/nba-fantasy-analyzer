@@ -105,6 +105,10 @@ directly to Yahoo via XML API POST.
 | `--faab-history` | Analyze league FAAB bid history |
 | `--strategy` | FAAB bid strategy: value / competitive / aggressive |
 | `--compact` | Condensed table: Player, Team, Z_Value, Adj_Score, Injury, Games_Wk, Hot, Trending |
+| `--watch` | Run analysis once and email results (for scheduled/cron use) |
+| `--team N` | Override YAHOO_TEAM_ID for this run (e.g. `--team 3` to analyze team #3) |
+| `--list-leagues` | Show all your Yahoo Fantasy NBA leagues and exit |
+| `--list-teams` | Show all teams in your league and exit |
 
 ## Architecture
 
@@ -112,14 +116,16 @@ directly to Yahoo via XML API POST.
 main.py                    # CLI entry point & pipeline orchestration
 config.py                  # All settings & environment config
 src/
-  nba_stats.py             # NBA stats + z-score engine (volume-weighted FG%/FT%) + hot-pickup z-delta
+  yahoo_stats.py           # Yahoo Fantasy stats fetching + hot-pickup z-delta engine
   yahoo_fantasy.py         # Yahoo API wrapper (OAuth2, roster scanning, trending players)
   waiver_advisor.py        # Core recommendation engine (need-weighted + recency/trending boosts)
   injury_news.py           # ESPN injury API integration
+  player_news.py           # Player news keyword analysis (ESPN blurbs + scoreboard standouts)
   schedule_analyzer.py     # NBA schedule density analysis
   faab_analyzer.py         # FAAB bid history & tier-based suggestions
   league_settings.py       # League rules, FAAB budget tracking
   transactions.py          # Yahoo waiver claim / FAAB bid submission
+  notifier.py              # HTML email reports for watch/scheduled mode
   colors.py                # ANSI color utilities for terminal output
 ```
 
