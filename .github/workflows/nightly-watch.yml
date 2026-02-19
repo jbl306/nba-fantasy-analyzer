@@ -14,8 +14,7 @@
 #
 # ─── Required Variables (Settings → Variables → Actions) ────────────
 #   YAHOO_LEAGUE_ID          Your fantasy league ID (e.g. 94443)
-#   YAHOO_TEAM_ID            Your team number (e.g. 9)
-#
+#   YAHOO_TEAM_ID            Your team number (e.g. 9)#   NOTIFY_EMAIL_FROM        Sender Gmail address (the one with the App Password)#
 # ─── Setup ──────────────────────────────────────────────────────────
 #   1. Push the repo to GitHub (private repo is fine)
 #   2. Run locally once to complete Yahoo OAuth: python main.py --list-leagues
@@ -75,6 +74,7 @@ jobs:
           YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
           YAHOO_TOKEN_TYPE=${{ secrets.YAHOO_TOKEN_TYPE }}
           NOTIFY_EMAIL_TO=${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_EMAIL_FROM=${{ vars.NOTIFY_EMAIL_FROM }}
           NOTIFY_SMTP_PASSWORD=${{ secrets.NOTIFY_SMTP_PASSWORD }}
           ENVEOF
 
