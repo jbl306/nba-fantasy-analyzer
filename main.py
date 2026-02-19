@@ -1,8 +1,9 @@
 """NBA Fantasy Advisor - Nightly waiver wire recommendations.
 
-Uses nba_api to scrape real NBA stats and yfpy to connect to your
-Yahoo Fantasy Basketball league, then recommends the best available
-waiver pickups based on 9-category z-score analysis.
+Uses Yahoo Fantasy API (via yfpy) for player stats and league data,
+ESPN public APIs for injury reports, news, and boxscores, and NBA.com
+CDN for scheduling. Recommends the best available waiver pickups
+based on 9-category z-score analysis.
 
 Usage:
     python main.py                  # Full analysis with Yahoo Fantasy
@@ -103,6 +104,12 @@ Examples:
         help="Streaming mode: find the best available player with a game today for your weakest roster spot",
     )
     parser.add_argument(
+        "--team",
+        type=int,
+        default=None,
+        help="Override YAHOO_TEAM_ID for this run (e.g. --team 3 to analyze team #3)",
+    )
+    parser.add_argument(
         "--watch",
         action="store_true",
         help="Run analysis once and send results via email notification (designed for scheduled/cron use)",
@@ -118,6 +125,8 @@ Examples:
     args = parser.parse_args()
 
     # Override config if args provided
+    if args.team:
+        config.YAHOO_TEAM_ID = args.team
     if args.top:
         config.TOP_N_RECOMMENDATIONS = args.top
     if args.days:
@@ -209,11 +218,13 @@ Examples:
     if args.stream and args.watch:
         from src.waiver_advisor import run_streaming_analysis
         from src.notifier import send_email_report
+        from src.yahoo_fantasy import create_yahoo_query, get_team_name
+        team_name = get_team_name(create_yahoo_query())
         rec_df = run_streaming_analysis(return_data=True)
         if rec_df is not None and not rec_df.empty:
             top_n = config.TOP_N_RECOMMENDATIONS
             print(f"\n  Sending streaming report via email (top {top_n})...")
-            send_email_report(rec_df, top_n=top_n, mode="stream")
+            send_email_report(rec_df, top_n=top_n, mode="stream", team_name=team_name)
         else:
             print("  No streaming recommendations to send.")
         return
@@ -223,10 +234,12 @@ Examples:
     # ---------------------------------------------------------------
     if args.watch:
         from src.notifier import send_email_report
+        from src.yahoo_fantasy import get_team_name, create_yahoo_query
+        team_name = get_team_name(create_yahoo_query())
         print()
         print("=" * 70)
         print("  NBA FANTASY ADVISOR - Watch Mode")
-        print(f"  League: {config.YAHOO_LEAGUE_ID} | Team: {config.YAHOO_TEAM_ID}")
+        print(f"  League: {config.YAHOO_LEAGUE_ID} | Team: {config.YAHOO_TEAM_ID} ({team_name})")
         print("=" * 70)
         print()
 
@@ -242,7 +255,7 @@ Examples:
             if rec_df is not None and not rec_df.empty:
                 top_n = config.TOP_N_RECOMMENDATIONS
                 print(f"\n  Sending email report (top {top_n} recommendations)...")
-                send_email_report(rec_df, schedule_analysis=schedule_analysis, top_n=top_n)
+                send_email_report(rec_df, schedule_analysis=schedule_analysis, top_n=top_n, team_name=team_name)
             else:
                 print("  No recommendations to send.")
         else:

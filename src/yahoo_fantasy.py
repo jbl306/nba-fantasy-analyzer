@@ -21,34 +21,49 @@ _AUTH_BACKOFF = 1.0  # seconds; doubles each retry
 def _patch_get_response(query: YahooFantasySportsQuery) -> None:
     """Patch yfpy's get_response to retry after 401 re-authentication.
 
-    yfpy's get_response refreshes the OAuth token on a 401, but then
+    yfpy's ``get_response`` refreshes the OAuth token on a 401, but then
     continues processing the *original* failed response instead of
-    retrying the request with the new token.  This wrapper catches the
-    resulting error, forces a fresh re-authentication with back-off,
-    and retries up to ``_AUTH_RETRIES`` times.
+    retrying the request with the new token.  It logs the error at
+    ERROR level before raising — producing noisy "You must be logged in"
+    messages even when the retry will succeed.
+
+    This wrapper:
+    1. Suppresses yfpy's ERROR logs during retried attempts so the user
+       doesn't see misleading error lines for transient auth failures.
+    2. Forces a fresh ``_authenticate()`` with back-off between retries.
+    3. Re-raises the last exception only if *all* retries fail.
     """
     _original = query.get_response
-    _logger = logging.getLogger("yfpy.query")
+    _yfpy_logger = logging.getLogger("yfpy.query")
 
     def _get_response_with_retry(url: str):
         last_exc: Exception | None = None
         for attempt in range(_AUTH_RETRIES):
+            # Suppress yfpy's ERROR logs for the expected "You must be
+            # logged in" message that yfpy emits internally *before*
+            # our retry logic can kick in.  We restore the level in the
+            # finally block so normal errors still appear.
+            prev_level = _yfpy_logger.level
+            _yfpy_logger.setLevel(logging.CRITICAL)
             try:
-                return _original(url)
+                result = _original(url)
+                return result
             except Exception as exc:
                 if "logged in" not in str(exc).lower():
+                    # Not an auth error — restore logging and re-raise
+                    _yfpy_logger.setLevel(prev_level)
                     raise
                 last_exc = exc
                 wait = _AUTH_BACKOFF * (attempt + 1)
-                _logger.debug(
-                    "Yahoo auth error — re-authenticating and retrying "
-                    "in %.1fs (attempt %d/%d)…",
-                    wait, attempt + 1, _AUTH_RETRIES,
-                )
+                if attempt == 0:
+                    print(
+                        f"  Yahoo auth expired — refreshing token "
+                        f"(retry {attempt + 1}/{_AUTH_RETRIES})…"
+                    )
                 time.sleep(wait)
-                # Force a full token refresh before the next attempt so
-                # the session carries a valid access token.
                 query._authenticate()
+            finally:
+                _yfpy_logger.setLevel(prev_level)
         raise last_exc  # type: ignore[misc]
 
     query.get_response = _get_response_with_retry
@@ -159,7 +174,8 @@ def list_league_teams(query: YahooFantasySportsQuery) -> list[dict]:
     for team_obj in teams:
         team = team_obj.team if hasattr(team_obj, "team") else team_obj
         team_id = getattr(team, "team_id", None)
-        name = str(getattr(team, "name", "Unknown"))
+        raw_name = getattr(team, "name", "Unknown")
+        name = raw_name.decode("utf-8") if isinstance(raw_name, bytes) else str(raw_name)
 
         # Extract manager info
         managers = getattr(team, "managers", None)
@@ -182,6 +198,22 @@ def list_league_teams(query: YahooFantasySportsQuery) -> list[dict]:
         })
 
     return teams_out
+
+
+def get_team_name(query: YahooFantasySportsQuery, team_id: int | None = None) -> str:
+    """Return the fantasy team name for *team_id* (defaults to ``config.YAHOO_TEAM_ID``).
+
+    Returns an empty string on failure so callers can safely use
+    ``team_name or ""``.
+    """
+    tid = team_id if team_id is not None else config.YAHOO_TEAM_ID
+    try:
+        for t in list_league_teams(query):
+            if t["team_id"] == tid:
+                return t["name"]
+    except Exception:
+        pass
+    return ""
 
 
 def get_league_teams(query: YahooFantasySportsQuery) -> list:

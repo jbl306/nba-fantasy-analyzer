@@ -1,0 +1,122 @@
+# NBA Fantasy Advisor — League-Wide On-Demand Report
+#
+# Any league member can trigger this workflow from the Actions tab to get
+# personalized waiver wire recommendations for their team.  Just pick
+# your team from the dropdown and hit "Run workflow".
+#
+# The pipeline uses read-only Yahoo API access — it fetches all rosters
+# anyway, so switching the "perspective team" only changes which players
+# are marked as "yours" and which category needs are analyzed.
+#
+# ─── Setup (repo owner, one-time) ───────────────────────────────────
+#   Same secrets/variables as nightly-watch.yml — see that file.
+#   Share the repo (or make it accessible) with league members so they
+#   can trigger the workflow from the Actions tab.
+# ────────────────────────────────────────────────────────────────────
+
+name: "League Advisor (pick your team)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      team:
+        description: "Select your team"
+        required: true
+        type: choice
+        options:
+          - "1 — the profeshunals"
+          - "2 — RAYNAUD's phenomenon"
+          - "3 — MeLO iN ThE TrAp"
+          - "4 — Dabham"
+          - "5 — Cool Cats"
+          - "6 — Rookie"
+          - "7 — Da Young OG"
+          - "8 — Old School Legends"
+          - "9 — jbl"
+          - "10 — Tanking for tanking's sake"
+          - "11 — Big Kalk"
+          - "12 — Kailash Gupta's Boss Team"
+      top_n:
+        description: "Number of recommendations (default: 10)"
+        required: false
+        type: string
+        default: "10"
+      email:
+        description: "Email address to send the report to (leave blank to skip)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  advise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Parse team ID from selection
+        id: team
+        run: |
+          # Extract the numeric team ID from "3 — MeLO iN ThE TrAp"
+          TEAM_ID=$(echo "${{ inputs.team }}" | grep -oP '^\d+')
+          echo "id=$TEAM_ID" >> "$GITHUB_OUTPUT"
+          echo "Selected team ID: $TEAM_ID"
+
+      - name: Build .env from secrets and variables
+        run: |
+          cat > .env << ENVEOF
+          YAHOO_CONSUMER_KEY=${{ secrets.YAHOO_CONSUMER_KEY }}
+          YAHOO_CONSUMER_SECRET=${{ secrets.YAHOO_CONSUMER_SECRET }}
+          YAHOO_LEAGUE_ID=${{ vars.YAHOO_LEAGUE_ID }}
+          YAHOO_TEAM_ID=${{ steps.team.outputs.id }}
+          YAHOO_GAME_CODE=nba
+          YAHOO_ACCESS_TOKEN=${{ secrets.YAHOO_ACCESS_TOKEN }}
+          YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
+          YAHOO_TOKEN_TYPE=${{ secrets.YAHOO_TOKEN_TYPE }}
+          NOTIFY_EMAIL_TO=${{ inputs.email }}
+          NOTIFY_EMAIL_FROM=${{ vars.NOTIFY_EMAIL_FROM }}
+          NOTIFY_SMTP_PASSWORD=${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          ENVEOF
+
+      - name: Fix OUTPUT_DIR for Linux
+        run: |
+          mkdir -p outputs
+          sed -i 's|OUTPUT_DIR = .*|OUTPUT_DIR = Path("outputs")|' config.py
+
+      - name: Run analysis
+        run: |
+          TOP_ARG=""
+          if [ "${{ inputs.top_n }}" != "10" ] && [ -n "${{ inputs.top_n }}" ]; then
+            TOP_ARG="--top ${{ inputs.top_n }}"
+          fi
+
+          WATCH_ARG=""
+          if [ -n "${{ inputs.email }}" ]; then
+            WATCH_ARG="--watch"
+          fi
+
+          python -u main.py --team ${{ steps.team.outputs.id }} $WATCH_ARG $TOP_ARG 2>&1 | tee outputs/report.txt
+        timeout-minutes: 14
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waiver-report-team-${{ steps.team.outputs.id }}
+          path: outputs/
+          retention-days: 7

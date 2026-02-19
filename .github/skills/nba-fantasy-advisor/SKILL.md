@@ -60,7 +60,7 @@ python main.py
 
 This executes the full pipeline:
 
-1. Fetch NBA player stats via `nba_api` and compute 9-category z-scores
+1. Fetch NBA player stats via Yahoo Fantasy API and compute 9-category z-scores
 2. Connect to Yahoo Fantasy API and scan all league rosters
 3. Identify unowned players and score them against your roster's category needs
 4. Pull real-time injury data from ESPN and apply severity multipliers
@@ -183,12 +183,13 @@ Solution:
 2. Delete any cached token files and re-authenticate
 3. The built-in retry logic will attempt up to 3 re-auth cycles automatically
 
-### Error: "No stats returned from NBA API"
+### Error: "No stats returned"
 
-Cause: NBA.com API may be down or rate-limited.
+Cause: Yahoo API may be down or credentials expired.
 Solution:
-1. Wait a few minutes and retry
-2. Check if `nba_api` has a newer version: `pip install --upgrade nba_api`
+1. Verify your Yahoo OAuth credentials in `.env`
+2. Delete cached token files and re-authenticate
+3. Wait a few minutes and retry
 
 ### Error: ESPN injury data empty
 

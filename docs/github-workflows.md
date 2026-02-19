@@ -8,10 +8,13 @@ The advisor ships with two GitHub Actions workflows that run automatically in th
 
 | Workflow | File | Auto Schedule | Manual | Command | Email Subject |
 |----------|------|--------------|--------|---------|---------------|
-| Nightly Waiver Report | `nightly-watch.yml` | 11:00 PM ET daily | ✅ | `--watch` | 🏀 Waiver Wire Report |
-| Daily Streaming Picks | `daily-stream.yml` | 12:30 AM ET daily | ✅ | `--stream --watch` | 🏀 Streaming Picks |
+| Nightly Waiver Report | `nightly-watch.yml` | 11:00 PM ET daily | ✅ | `--watch` | 🏀 Waiver Wire Report [team] |
+| Daily Streaming Picks | `daily-stream.yml` | 12:30 AM ET daily | ✅ | `--stream --watch` | 🏀 Streaming Picks [team] |
+| League Advisor | `league-advisor.yml` | — (on-demand only) | ✅ | `--team N --watch` | 🏀 Waiver Wire Report [team] |
 
-Both workflow files live in `.github/workflows/`.
+All workflow files live in `.github/workflows/`.
+
+> **League Advisor email:** League members just type their email in the workflow input — no secrets setup needed on their end. The repo owner's SMTP credentials (already configured as secrets) handle delivery.
 
 ---
 
@@ -171,6 +174,59 @@ Both workflows upload their CSV outputs as run artifacts. To access them:
 3. Download `waiver-report-N` or `streaming-report-N`
 
 Artifacts are kept for **7 days** before automatic deletion.
+
+---
+
+## Workflow 3 — League Advisor (on-demand, any team)
+
+**File:** `.github/workflows/league-advisor.yml`
+
+An on-demand workflow any league member can use. Pick your team from a dropdown, optionally enter an email address, and get a personalised waiver report. League members don't need to configure any secrets — the email is sent using the repo owner's SMTP credentials.
+
+### Additional setup (repo owner)
+
+Beyond the secrets listed above, add **one repository variable** for the League Advisor email feature:
+
+1. Go to **Settings** → **Secrets and variables** → **Actions** → **Variables** tab
+2. Add `NOTIFY_EMAIL_FROM` = your Gmail address (the one with the App Password)
+
+This lets the workflow send reports *to* any league member's email *from* your account.
+
+### Inputs
+
+| Input | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| **team** | choice | ✅ | — | Your fantasy team (see reference table below) |
+| **top_n** | string | ❌ | `10` | Number of recommendations |
+| **email** | string | ❌ | — | Email address to receive the report (leave blank to skip) |
+
+### How to use
+
+1. Go to **Actions** → **League Advisor (pick your team)**
+2. Click **Run workflow**
+3. Select your team from the dropdown
+4. Optionally enter your email address
+5. Click **Run workflow**
+6. When complete, download the artifact or check your inbox
+
+### Team Reference Table
+
+| ID | Team Name |
+|----|-----------|
+| 1 | the profeshunals |
+| 2 | RAYNAUD's phenomenon |
+| 3 | MeLO iN ThE TrAp |
+| 4 | Dabham |
+| 5 | Cool Cats |
+| 6 | Rookie |
+| 7 | Da Young OG |
+| 8 | Old School Legends |
+| 9 | jbl |
+| 10 | Tanking for tanking's sake |
+| 11 | Big Kalk |
+| 12 | Kailash Gupta's Boss Team |
+
+> **Note:** Team names may change during the season. Run `python main.py --list-teams` locally to see the current names, or check the dropdown in the workflow dispatch UI.
 
 ---
 

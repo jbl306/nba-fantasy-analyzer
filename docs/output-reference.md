@@ -71,24 +71,24 @@ The main output is a ranked table of available waiver wire players.
 | Column | Source | Description |
 |--------|--------|-------------|
 | **Rank** | Computed | Position in the sorted recommendation list (1 = best pickup) |
-| **Player** | nba_api | Full player name |
-| **Team** | nba_api | NBA team abbreviation (e.g., DEN, PHI, LAL) |
-| **GP** | nba_api | Games Played this season |
-| **MIN** | nba_api | Average minutes per game |
+| **Player** | Yahoo API | Full player name |
+| **Team** | Yahoo API | NBA team abbreviation (e.g., DEN, PHI, LAL) |
+| **GP** | Yahoo API | Games Played this season |
+| **MIN** | Yahoo API | Average minutes per game |
 | **Avail%** | Computed | Season availability rate: `GP / Team_GP`. Higher is better. |
 | **Health** | Computed | Season durability flag (see table below) |
 | **Injury** | ESPN API | Injury report status from ESPN (see table below) |
 | **Recent** | Game Log | Recent activity status with days since last game (see table below) |
 | **G/14d** | Game Log | Number of games played in the last 14 days. 0 likely means injured/out. |
-| **FG%** | nba_api | Field Goal Percentage (per game) |
-| **FT%** | nba_api | Free Throw Percentage (per game) |
-| **3PM** | nba_api | Three-Pointers Made per game |
-| **PTS** | nba_api | Points per game |
-| **REB** | nba_api | Total rebounds per game |
-| **AST** | nba_api | Assists per game |
-| **STL** | nba_api | Steals per game |
-| **BLK** | nba_api | Blocks per game |
-| **TO** | nba_api | Turnovers per game |
+| **FG%** | Yahoo API | Field Goal Percentage (per game) |
+| **FT%** | Yahoo API | Free Throw Percentage (per game) |
+| **3PM** | Yahoo API | Three-Pointers Made per game |
+| **PTS** | Yahoo API | Points per game |
+| **REB** | Yahoo API | Total rebounds per game |
+| **AST** | Yahoo API | Assists per game |
+| **STL** | Yahoo API | Steals per game |
+| **BLK** | Yahoo API | Blocks per game |
+| **TO** | Yahoo API | Turnovers per game |
 | **Z_Value** | Computed | Sum of z-scores across all 9 categories. Raw talent ranking without adjustments. |
 | `Z_Delta` | Computed | Difference between recent-game z-score and season z-score. Positive = improving, negative = declining. Color-coded: green (≥ 1.0), red (≤ -1.0). |
 | **Hot** | Computed | 🔥 when `Z_Delta` ≥ 1.0 — player is performing significantly above their season average in recent games. |

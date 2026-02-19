@@ -33,8 +33,10 @@ name: "Nightly Waiver Report"
 
 on:
   schedule:
-    # 11:00 PM ET = 04:00 UTC next day (EST)
-    # Adjust for EDT (summer): 03:00 UTC
+    # 11:00 PM EST = 04:00 UTC (Nov–Mar)
+    # 11:00 PM EDT = 03:00 UTC (Mar–Nov)
+    # Both entries ensure ~11 PM ET year-round.
+    - cron: "0 3 * * *"
     - cron: "0 4 * * *"
 
   # Allow manual trigger from the Actions tab

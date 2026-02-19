@@ -18,14 +18,15 @@ The recommendation engine runs a multi-step pipeline, with optional FAAB analysi
 │  2. Scan all league rosters                      │
 │     Fetch every team's roster → owned player set │
 ├──────────────────────────────────────────────────┤
-│  3. Fetch NBA stats from nba_api                 │
+│  3. Fetch player stats from Yahoo Fantasy API    │
 │     Season per-game stats for all NBA players    │
+│     via batched game-level stat queries           │
 ├──────────────────────────────────────────────────┤
 │  4. Filter to available players only             │
 │     Remove all owned players from the stats pool │
 ├──────────────────────────────────────────────────┤
 │  5a. Check recent game activity                  │
-│     Game logs to detect injuries / inactivity    │
+│     DataFrame-based availability analysis        │
 ├──────────────────────────────────────────────────┤
 │  5a-i. Hot-pickup analysis                       │
 │     Recent-game z-delta breakout detection (🔥)   │
@@ -36,11 +37,15 @@ The recommendation engine runs a multi-step pipeline, with optional FAAB analysi
 │  5b. Fetch injury report (ESPN JSON API)         │
 │     Injuries, suspensions + news blurbs          │
 ├──────────────────────────────────────────────────┤
+│  5b-ii. Player news analysis                     │
+│     ESPN blurbs + Yahoo notes + ESPN scoreboard  │
+│     → role/performance keywords → news_mult      │
+├──────────────────────────────────────────────────┤
 │  5c. Fetch NBA schedule                          │
 │     Remaining games per team this week + future  │
 ├──────────────────────────────────────────────────┤
 │  6. Score, rank, and output recommendations      │
-│     Z × needs × avail × injury × schedule        │
+│     Z × needs × avail × injury × sched × news   │
 │     + recency boost + trending boost             │
 ├──────────────────────────────────────────────────┤
 │  7. FAAB bid analysis (optional, --faab-history) │
@@ -83,12 +88,21 @@ Rather than relying on Yahoo's free agent endpoint (which can be slow and imprec
 
 The player name matching uses normalization (lowercase, strip punctuation, remove periods/hyphens) to handle differences between Yahoo and NBA.com name formats.
 
-## Step 3 — NBA Stats Fetching
+## Step 3 — Player Stats Fetching (Yahoo Fantasy API)
 
-Pulls current-season per-game stats for all qualifying NBA players from the [nba_api](https://github.com/swar/nba_api) library via the `LeagueDashPlayerStats` endpoint. Players are filtered to those with:
+Pulls current-season per-game stats for all NBA players from the **Yahoo Fantasy Sports API** via batched game-level stat queries. The Yahoo API returns stats for all ~700+ NBA players using the league's actual stat category configuration, ensuring perfect alignment with your league's scoring.
+
+Stats are fetched in batches of 25 player keys per API call, with each batch returning per-game averages for all configured stat categories (FG%, FT%, 3PM, PTS, REB, AST, STL, BLK, TO). Players are filtered to those with:
 
 - **≥ 15.0 minutes per game** — excludes end-of-bench players with unreliable small-sample stats
 - **≥ 5 games played** — ensures a minimum baseline of data
+
+During this phase, the tool also captures Yahoo player metadata at zero additional API cost:
+- **`has_recent_player_notes`** — flag for players with recent Yahoo news
+- **`injury_note`** — Yahoo's injury designation if present
+- **Player status** — roster status (e.g., IL, IL+, Active)
+
+> **Why Yahoo + ESPN?** Yahoo's API is authenticated via OAuth2 and works reliably from any environment, including GitHub Actions. ESPN's public APIs provide boxscores, injuries, and news with no auth required. This combination avoids any dependency on `stats.nba.com` which aggressively blocks cloud/CI IP ranges.
 
 ## Step 4 — Availability Filtering
 
@@ -96,20 +110,112 @@ Cross-references the NBA stats pool against the owned player name set from Step 
 
 ## Step 5 — Recent Activity Check
 
-For the top 10 waiver candidates (by raw z-score), the tool fetches individual game logs from `nba_api` to determine:
+Availability is now determined directly from the player stats DataFrame using season-long availability rate (`GP / Team GP`), eliminating the need for per-player game log API calls.
 
-- **Last game date** — when the player last appeared in an NBA game
-- **Days since last game** — how long they've been absent
-- **Games in last 14 days** — recent volume of play
+| Flag | Availability Rate | Meaning |
+|------|-------------------|--------|
+| **Healthy** | ≥ 80% | Durable, reliable starter |
+| **Moderate** | 60–80% | Some missed time |
+| **Risky** | 40–60% | Significant injury history |
+| **Fragile** | < 40% | Rarely available |
 
-This catches players who have great season averages but are currently injured, suspended, or in the G-League. See the [Availability & Injury Risk](#availability--injury-risk) section for how this affects scoring.
+This catches players who have great per-game averages but miss significant time due to injuries, suspensions, or G-League assignments. See the [Availability & Injury Risk](#availability--injury-risk) section for how this affects scoring.
+
+> **API efficiency:** This step uses **0 API calls** — all data comes from the DataFrame already built in Step 3.
+
+## Step 5b-ii — Player News Analysis
+
+After fetching the injury report, the tool performs **keyword-based news analysis** to detect role/performance signals that affect a player's future fantasy value beyond raw stats. This analysis combines three data sources:
+
+### Data Sources
+
+| Source | API Calls | What It Provides |
+|--------|-----------|------------------|
+| ESPN injury blurbs | 0 (reuses injury data) | Role changes, return timelines, extended absences |
+| Yahoo player notes flag | 0 (captured in Step 3) | `has_recent_player_notes` boolean |
+| ESPN general news feed | 1 | Trade impacts, breakout articles, waiver buzz |
+| ESPN boxscores | ~5 per day (3 days) | Full stat lines, starter flags, standout detection |
+
+### Keyword Categories
+
+**Positive signals** (multiplier > 1.0):
+
+| Label | Example Pattern | Multiplier | Signal |
+|-------|----------------|------------|--------|
+| Starting | "step into the starting role" | ×1.15 | Lineup promotion |
+| Will Start | "will start", "in the starting lineup" | ×1.12 | Confirmed start tomorrow |
+| Next Man Up | "next man up" | ×1.12 | Teammate injury opens role |
+| Career High | "career-high 38 points" | ×1.12 | Breakout performance |
+| Cleared | "cleared to play" | ×1.12 | Returning from injury |
+| Expected Starter | "expected to start", "projected starter" | ×1.10 | Likely starting tomorrow |
+| Expanded Role | "bigger opportunity" | ×1.10 | More usage expected |
+| Returning | "returning to action" | ×1.10 | Back from absence |
+| No Restrictions | "no minutes restriction" | ×1.10 | Full workload |
+| Waiver Buzz | "must-add", "waiver wire" | ×1.10 | Fantasy analyst recommendation |
+| Breakout | "breakout season" | ×1.10 | Emerging talent |
+| Near Return | "trending towards a return" | ×1.08 | Coming back soon |
+| Debut | "making his debut" | ×1.08 | First game opportunity |
+| 30+ PTS | Scoreboard: 32 PTS | ×1.08 | Recent dominant scoring |
+| Double-Double | "double-double" | ×1.05 | Strong all-around game |
+| Recent Starter | ESPN boxscore starter flag | ×1.08 | Started most recent game |
+
+**Negative signals** (multiplier < 1.0):
+
+| Label | Example Pattern | Multiplier | Signal |
+|-------|----------------|------------|--------|
+| Season-Ending | "season-ending surgery" | ×0.00 | Done for the year |
+| Suspended | "arrested", "suspended" | ×0.60 | Legal/disciplinary |
+| Indefinite | "indefinitely" | ×0.65 | No return timeline |
+| G-League | "assigned to G-League" | ×0.70 | Sent down |
+| No Timeline | "no timetable" | ×0.72 | Extended absence |
+| Re-Injury | "re-aggravated" | ×0.75 | Setback |
+| Week-to-Week | "week-to-week" | ×0.78 | Multi-week absence |
+| DNP | "DNP" | ×0.80 | Not playing |
+| Sitting Tomorrow | "sitting tomorrow", "out tomorrow" | ×0.78–0.80 | Confirmed miss |
+| Re-Evaluation | "re-evaluated in 2 weeks" | ×0.82 | Extended absence |
+| Ruled Out | "ruled out" | ×0.75 | Officially out |
+| Benched | "moved to bench" | ×0.85 | Lineup demotion |
+| Bench Role | "coming off the bench" | ×0.88 | Reduced minutes |
+| Mins Restriction | "minutes restriction" | ×0.90 | Capped workload |
+| Load Mgmt | "load management" | ×0.90 | Rest days expected |
+| Traded | "traded to" | ×0.92 | Role uncertainty |
+
+### ESPN Boxscore Standouts
+
+The tool fetches ESPN game summaries (full boxscores) for the last 3 game-days, extracting per-player stat lines with starter/bench flags. Stat lines are evaluated against **waiver-calibrated thresholds** designed for the 8–14 PPG population typical of waiver candidates:
+
+| Category | Tier 1 | Boost | Tier 2 | Boost | Tier 3 | Boost |
+|----------|--------|-------|--------|-------|--------|-------|
+| PTS | 15+ | ×1.03 | 22+ | ×1.05 | 30+ | ×1.08 |
+| REB | 8+ | ×1.04 | 12+ | ×1.06 | — | — |
+| AST | 6+ | ×1.04 | 10+ | ×1.06 | — | — |
+| STL | 3+ | ×1.04 | 4+ | ×1.06 | — | — |
+| BLK | 3+ | ×1.04 | 4+ | ×1.06 | — | — |
+| 3PM | 4+ | ×1.04 | 6+ | ×1.06 | — | — |
+
+Boxscore data also powers **hot-pickup analysis**: recent stat lines are converted to the same format as Yahoo game logs and z-scored against season averages, replacing per-date Yahoo API calls with free ESPN data.
+
+Players who **started their most recent game** get a "Recent Starter" ×1.08 boost — a strong indicator they'll start tomorrow (relevant since pickups are for next day only).
+
+### Combined News Multiplier
+
+All matched keyword multipliers for a player are combined multiplicatively:
+
+$$
+M_{news} = \prod_{k \in \text{matched keywords}} m_k
+$$
+
+**Example:** A player whose ESPN blurb says "stepping into the starting role" (×1.15) and who also posted 31 PTS as a game leader (×1.08) receives $M_{news} = 1.15 \times 1.08 = 1.24$.
+
+---
 
 ## Step 6 — Scoring & Ranking
 
-The final score for each player combines three factors:
+The final score for each player combines multiple factors:
 
 ```
-Adj_Score = (Z_Total + Need_Boost) × Availability_Multiplier × Schedule_Multiplier
+Adj_Score = (Z_Total + Need_Boost) × M_avail × M_injury × M_schedule × M_news
+            + B_recency + B_trending
 ```
 
 Each component is described below.
@@ -348,15 +454,16 @@ This means two "Out" players can receive very different penalties based on their
 Putting it all together:
 
 $$
-Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{injury} \times M_{schedule} + B_{recency} + B_{trending}
+Adj\_Score = \left( Z\_Total + \sum_{w \in \text{3 weakest}} z_w \times 0.5 \right) \times M_{avail} \times M_{injury} \times M_{schedule} \times M_{news} + B_{recency} + B_{trending}
 $$
 
 Where:
 - $Z\_Total$ = sum of 9 category z-scores (raw talent)
 - $z_w$ = z-score in each of the team's 3 weakest categories (need boost)
-- $M_{avail}$ = season availability × recent activity multiplier (stacked: e.g. 0.85 × 0.75)
+- $M_{avail}$ = season availability multiplier (based on GP / Team GP ratio)
 - $M_{injury}$ = injury/suspension report multiplier (0.0 to 1.0; 1.0 if not on report)
 - $M_{schedule}$ = schedule multiplier based on team games vs league average (see [Schedule Analysis](schedule-analysis.md))
+- $M_{news}$ = player news multiplier from keyword analysis (see [Step 5b-ii](#step-5b-ii--player-news-analysis))
 - $B_{recency}$ = `HOT_PICKUP_RECENCY_WEIGHT` × `z_delta` (only when positive; 0 otherwise)
 - $B_{trending}$ = `HOT_PICKUP_TRENDING_WEIGHT` × min(Δ%Own / 10, 3.0) (only when 📈 trending)
 

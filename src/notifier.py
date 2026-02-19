@@ -73,18 +73,21 @@ def _format_html_report(
     top_n: int = 15,
     mode: str = "watch",
     il_action: dict | None = None,
+    team_name: str = "",
 ) -> str:
     """Build an HTML email body from the recommendation DataFrame."""
     now = datetime.now().strftime("%A %B %d, %Y at %I:%M %p")
     rows = rec_df.head(top_n)
 
+    team_label = f" — {team_name}" if team_name else ""
+
     # Mode-specific header
     if mode == "stream":
-        title = "🏀 Streaming Picks — Today's Games"
+        title = f"🏀 Streaming Picks{team_label}"
         subtitle = f"Best available players with a game today — {now}"
         footer_note = "Streaming mode: daily add/drop for players with games today."
     else:
-        title = "🏀 NBA Fantasy Advisor"
+        title = f"🏀 NBA Fantasy Advisor{team_label}"
         subtitle = f"Waiver Wire Report — {now}"
         footer_note = "Adj_Score = Z × needs × availability × injury × schedule + recency + trending"
 
@@ -230,11 +233,13 @@ def _format_html_report(
 def _format_plain_report(
     rec_df: "pd.DataFrame",
     top_n: int = 15,
+    team_name: str = "",
 ) -> str:
     """Build a plain-text fallback for the email."""
     now = datetime.now().strftime("%A %B %d, %Y at %I:%M %p")
+    team_label = f" ({team_name})" if team_name else ""
     lines = [
-        "NBA Fantasy Advisor - Waiver Wire Report",
+        f"NBA Fantasy Advisor - Waiver Wire Report{team_label}",
         f"Generated: {now}",
         "",
         f"{'#':<4} {'Player':<22} {'Team':<5} {'Z':>6} {'Score':>7} {'Injury':<8}",
@@ -261,6 +266,7 @@ def send_email_report(
     top_n: int = 15,
     mode: str = "watch",
     il_action: dict | None = None,
+    team_name: str = "",
 ) -> bool:
     """Send the recommendation report via email.
 
@@ -270,6 +276,7 @@ def send_email_report(
         top_n: Number of recommendations to include.
         mode: Report type — ``"watch"`` (full waiver) or ``"stream"`` (today's games).
         il_action: Optional IL resolution recommendation dict from streaming analysis.
+        team_name: Fantasy team name to display in the subject/body.
 
     Returns True on success, False on failure (prints error to stderr).
     """
@@ -282,14 +289,15 @@ def send_email_report(
     if il_action is None and hasattr(rec_df, "attrs"):
         il_action = rec_df.attrs.get("il_action")
 
-    html_body = _format_html_report(rec_df, schedule_analysis, top_n, mode=mode, il_action=il_action)
-    text_body = _format_plain_report(rec_df, top_n)
+    html_body = _format_html_report(rec_df, schedule_analysis, top_n, mode=mode, il_action=il_action, team_name=team_name)
+    text_body = _format_plain_report(rec_df, top_n, team_name=team_name)
 
     now = datetime.now().strftime("%b %d")
+    team_suffix = f" [{team_name}]" if team_name else ""
     if mode == "stream":
-        subject = f"🏀 Streaming Picks — {now}"
+        subject = f"🏀 Streaming Picks — {now}{team_suffix}"
     else:
-        subject = f"🏀 Waiver Wire Report — {now}"
+        subject = f"🏀 Waiver Wire Report — {now}{team_suffix}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject

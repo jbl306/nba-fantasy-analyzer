@@ -10,7 +10,7 @@ In fantasy basketball, not all weeks are equal. Some teams play 4–5 games in a
 
 The schedule analyzer:
 
-1. **Fetches the full NBA schedule** from NBA.com's CDN (with per-day fallback via nba_api)
+1. **Fetches the full NBA schedule** from NBA.com's CDN (with per-day fallback via ESPN scoreboard)
 2. **Computes game counts per team** for each upcoming fantasy week (Monday–Sunday)
 3. **Applies a schedule multiplier** to waiver candidate scores based on games vs. league average
 4. **Compares waiver targets vs. droppable players** by projected weekly production
@@ -30,9 +30,9 @@ https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json
 
 This is a single HTTP request that returns every game for the entire season with dates, teams, and game IDs.
 
-### Fallback: nba_api Scoreboardv2
+### Fallback: ESPN Scoreboard
 
-If the CDN request fails, the tool falls back to querying `scoreboardv2` from `nba_api` for each day in the target range. This requires 7 API calls per week but provides the same data.
+If the CDN request fails, the tool falls back to querying ESPN's public scoreboard API for each day in the target range. This requires 7 API calls per week (no auth needed) and provides the same data.
 
 ---
 
@@ -222,7 +222,7 @@ All other abbreviations match between Yahoo and NBA.com.
 src/schedule_analyzer.py
 ├── Data Fetching
 │   ├── fetch_nba_schedule()              # Full season from NBA.com CDN
-│   └── _fetch_schedule_per_day()         # Fallback: nba_api per day
+│   └── _fetch_schedule_per_day()         # Fallback: ESPN scoreboard per day
 ├── Week Computation
 │   └── get_upcoming_weeks()              # Mon–Sun ranges for N weeks
 ├── Game Counting
@@ -249,4 +249,4 @@ src/schedule_analyzer.py
 - **Schedule changes:** NBA games can be postponed or rescheduled. The tool uses the latest available data but cannot predict future changes.
 - **Back-to-back impact:** The tool counts total games but doesn't account for rest/fatigue from back-to-back games, which can reduce per-game production.
 - **Playoff schedule:** NBA playoff schedule is not available until matchups are set, so late-season analysis may have limited forward visibility.
-- **CDN availability:** The NBA.com CDN endpoint may occasionally be unavailable; the fallback to nba_api scoreboardv2 handles this automatically.
+- **CDN availability:** The NBA.com CDN endpoint may occasionally be unavailable; the fallback to ESPN scoreboard handles this automatically.

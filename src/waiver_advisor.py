@@ -1,13 +1,13 @@
 """Waiver wire recommendation engine.
 
-Combines NBA stats (from nba_api) with Yahoo Fantasy roster data (from yfpy)
-to identify the best available pickups for a 9-category league.
+Combines NBA stats (from Yahoo Fantasy API) with Yahoo Fantasy roster data
+(from yfpy) to identify the best available pickups for a 9-category league.
 
 Flow:
   1. Connect to Yahoo Fantasy and fetch ALL team rosters in the league
   2. Build a set of owned player names (unavailable)
-  3. Fetch NBA stats from nba_api and compute 9-cat z-scores
-  4. Filter NBA stats to only players NOT owned in the league
+  3. Fetch player stats via Yahoo Fantasy API and compute 9-cat z-scores
+  4. Filter stats to only players NOT owned in the league
   5. Analyze your roster's strengths/weaknesses
   6. Rank available players with need-weighted scoring
 """
@@ -26,7 +26,12 @@ from src.injury_news import (
     format_injury_note,
     get_player_injury_status,
 )
-from src.nba_stats import build_player_stats_table, check_recent_activity, find_player_id
+from src.yahoo_stats import (
+    build_player_stats_table,
+    check_recent_activity,
+    compute_hot_pickup_scores,
+    compute_recent_game_stats,
+)
 from src.yahoo_fantasy import (
     create_yahoo_query,
     extract_player_details,
@@ -41,7 +46,7 @@ def match_nba_name_to_yahoo(nba_name: str, owned_names: set[str]) -> bool:
     """Check if an NBA player name matches any owned player in Yahoo.
 
     Args:
-        nba_name: Player name from nba_api (PLAYER_NAME column).
+        nba_name: Player name from the stats DataFrame (PLAYER_NAME column).
         owned_names: Set of normalized names of all owned players.
 
     Returns:
@@ -51,11 +56,11 @@ def match_nba_name_to_yahoo(nba_name: str, owned_names: set[str]) -> bool:
 
 
 def match_yahoo_to_nba(yahoo_name: str, nba_df: pd.DataFrame) -> int | None:
-    """Match a Yahoo Fantasy player name to the nba_api stats DataFrame.
+    """Match a Yahoo Fantasy player name to the stats DataFrame.
 
     Args:
         yahoo_name: Player name from Yahoo Fantasy.
-        nba_df: DataFrame from nba_api with PLAYER_NAME column.
+        nba_df: DataFrame with PLAYER_NAME column.
 
     Returns:
         Index in nba_df if matched, else None.
@@ -395,6 +400,7 @@ def score_available_players(
     schedule_analysis: dict | None = None,
     hot_pickup_scores: dict[int, dict] | None = None,
     trending_data: dict[str, dict] | None = None,
+    player_news: dict[str, dict] | None = None,
 ) -> pd.DataFrame:
     """Score and rank available players directly from the NBA stats DataFrame.
 
@@ -407,6 +413,7 @@ def score_available_players(
       - Injury report penalty from Basketball-Reference data
       - Schedule multiplier for upcoming game count (more games = higher value)
       - **Hot-pickup boost** for recent breakout performance (last N games)
+      - **Player news multiplier** for role/performance signals (ESPN blurbs)
       - **Trending boost** for players with spiking ownership across Yahoo
 
     When *schedule_analysis* is provided (multi-week), the schedule multiplier
@@ -422,9 +429,11 @@ def score_available_players(
         schedule_analysis: Optional full schedule analysis dict from
             :func:`build_schedule_analysis`.  Enables multi-week decay weighting.
         hot_pickup_scores: Optional dict from compute_hot_pickup_scores mapping
-            player_id → {recent_z_total, z_delta, is_hot}.
+            player_key → {recent_z_total, z_delta, is_hot}.
         trending_data: Optional dict from fetch_trending_players mapping
             normalized_name → {percent_owned, percent_owned_delta, is_trending}.
+        player_news: Optional dict from analyze_player_news mapping
+            normalized_name → {news_multiplier, news_labels, news_summary}.
 
     Returns:
         DataFrame of ranked waiver recommendations.
@@ -454,7 +463,7 @@ def score_available_players(
     recommendations = []
 
     for _, row in available_stats.iterrows():
-        player_id = row.get("PLAYER_ID", None)
+        player_key = str(row.get("PLAYER_KEY", ""))
         gp = int(row.get("GP", 0))
         team_gp = int(row.get("TEAM_GP", gp))
         avail_rate = row.get("AVAIL_RATE", 1.0)
@@ -471,8 +480,8 @@ def score_available_players(
         }
 
         # Check recent activity if available
-        if recent_activity and player_id and int(player_id) in recent_activity:
-            activity = recent_activity[int(player_id)]
+        if recent_activity and player_key and player_key in recent_activity:
+            activity = recent_activity[player_key]
             rec["Last Game"] = activity.get("last_game_date", "?") or "?"
             rec["Recent"] = activity.get("recent_flag", "?")
             games_14d = activity.get("games_last_14d", 0)
@@ -592,8 +601,8 @@ def score_available_players(
         rec["Z_Delta"] = "-"
         rec["Hot"] = ""
 
-        if hot_pickup_scores and player_id and int(player_id) in hot_pickup_scores:
-            hp = hot_pickup_scores[int(player_id)]
+        if hot_pickup_scores and player_key and player_key in hot_pickup_scores:
+            hp = hot_pickup_scores[player_key]
             rec["Recent_Z"] = hp["recent_z_total"]
             z_delta = hp["z_delta"]
             rec["Z_Delta"] = z_delta
@@ -603,6 +612,19 @@ def score_available_players(
                 recency_boost = config.HOT_PICKUP_RECENCY_WEIGHT * z_delta
             if hp.get("is_hot"):
                 rec["Hot"] = "🔥"
+
+        # ---------------------------------------------------------------
+        # Player news multiplier: role/performance signals from ESPN blurbs
+        # ---------------------------------------------------------------
+        news_mult = 1.0
+        rec["News"] = "-"
+
+        if player_news:
+            norm_name = normalize_name(player_name)
+            news_info = player_news.get(norm_name)
+            if news_info:
+                news_mult = news_info["news_multiplier"]
+                rec["News"] = news_info["news_summary"]
 
         # ---------------------------------------------------------------
         # Trending boost: ownership spike across Yahoo leagues
@@ -648,7 +670,7 @@ def score_available_players(
             trending_boost = 0.0
 
         adj_score = (
-            need_score * avail_mult * injury_mult * schedule_mult
+            need_score * avail_mult * injury_mult * schedule_mult * news_mult
             + recency_boost
             + trending_boost
         )
@@ -691,14 +713,14 @@ def format_recommendations(
 
     # Select display columns
     if compact:
-        display_cols = ["Player", "Team", "Games_Wk", "Injury", "Z_Value", "Adj_Score"]
+        display_cols = ["Player", "Team", "Games_Wk", "Injury", "News", "Z_Value", "Adj_Score"]
         # Add hot-pickup columns if data is present
         if "Hot" in df_display.columns:
             display_cols.insert(-1, "Hot")
         if "Trending" in df_display.columns:
             display_cols.insert(-1, "Trending")
     else:
-        display_cols = ["Player", "Team", "GP", "MIN", "Games_Wk", "Avail%", "Health", "Injury", "Recent", "G/14d"]
+        display_cols = ["Player", "Team", "GP", "MIN", "Games_Wk", "Avail%", "Health", "Injury", "News", "Recent", "G/14d"]
         for cat_info in config.STAT_CATEGORIES.values():
             if cat_info["name"] in df_display.columns:
                 display_cols.append(cat_info["name"])
@@ -761,6 +783,7 @@ def format_recommendations(
         lines.append("Avail%    = Games Played / Team Games (season durability)")
         lines.append("Health    = Healthy (>=80%) | Moderate (60-80%) | Risky (40-60%) | Fragile (<40%)  [based on games played ratio, NOT current injury]")
         lines.append("Injury    = Current ESPN injury status: OUT-SEASON | OUT | SUSP | DTD (Day-To-Day) | - (not on report)")
+        lines.append("News      = Role/performance signals from ESPN blurbs (Starting, Benched, Career High, etc.)")
         lines.append("Recent    = Active (played <3d ago) | Questionable (3-10d) | Inactive (>10d)")
 
     # Show injury notes for any recommended player with an injury
@@ -776,6 +799,19 @@ def format_recommendations(
             for _, row in injured_players.iterrows():
                 note = row['Injury_Note']
                 lines.append(f"  {row['Player']:<25} {note}")
+
+    # Show player news signals for recommended players
+    if "News" in rec_df.head(top_n).columns:
+        news_players = rec_df.head(top_n)[
+            rec_df.head(top_n)["News"] != "-"
+        ]
+        if not news_players.empty:
+            lines.append("")
+            lines.append(cyan("=" * 100))
+            lines.append(cyan("PLAYER NEWS SIGNALS (source: ESPN blurbs + Yahoo notes)"))
+            lines.append(cyan("=" * 100))
+            for _, row in news_players.iterrows():
+                lines.append(f"  {row['Player']:<25} {row['News']}")
 
     return "\n".join(lines)
 
@@ -834,8 +870,8 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     my_roster = get_my_team_roster(query)
     print(f"  {len(all_rosters)} teams, {len(owned_names)} owned players\n")
 
-    # ---- NBA stats ----
-    nba_stats = build_player_stats_table()
+    # ---- Player stats (via Yahoo Fantasy API) ----
+    nba_stats = build_player_stats_table(query)
     nba_stats["_norm_name"] = nba_stats["PLAYER_NAME"].apply(normalize_name)
     available_mask = ~nba_stats["_norm_name"].isin(owned_names)
     available_stats = nba_stats[available_mask].copy()
@@ -954,14 +990,16 @@ def run_streaming_analysis(return_data: bool = False) -> "pd.DataFrame | None":
     tomorrow_game_counts = {team: 1 for team in teams_tomorrow}
 
     # Recent activity check for the streaming pool
-    candidate_ids = (
+    candidate_keys = (
         streaming_pool.sort_values("Z_TOTAL", ascending=False)
-        .head(config.DETAILED_LOG_LIMIT)["PLAYER_ID"]
-        .dropna().astype(int).tolist()
+        .head(config.DETAILED_LOG_LIMIT)["PLAYER_KEY"]
+        .dropna().astype(str).tolist()
     )
     recent_activity = {}
-    if candidate_ids:
-        recent_activity = check_recent_activity(candidate_ids)
+    if candidate_keys:
+        recent_activity = check_recent_activity(
+            candidate_keys, query, stats_df=nba_stats
+        )
 
     # Score with need-weighting (schedule mult disabled — all have 1 game)
     recommendations = score_available_players(
@@ -1063,7 +1101,7 @@ def run_waiver_analysis(
 
     The flow is Yahoo-first:
       1. Query Yahoo Fantasy to get all league rosters (who is owned)
-      2. Fetch NBA stats from nba_api
+      2. Fetch NBA stats via Yahoo Fantasy API
       3. Filter stats to only available (unowned) players
       4. Analyze your roster and rank available players by need
 
@@ -1077,54 +1115,9 @@ def run_waiver_analysis(
         None normally, or (query, rec_df, nba_stats, schedule_analysis) if return_data=True.
     """
     if skip_yahoo:
-        # Fallback: just show top NBA players by z-score
-        nba_stats = build_player_stats_table()
-        print(f"  Loaded stats for {len(nba_stats)} players\n")
-
-        # Fetch injury report
-        injury_lookup = {}
-        if config.INJURY_REPORT_ENABLED:
-            injuries = fetch_injury_report()
-            injury_lookup = build_injury_lookup(injuries)
-            injured_in_pool = sum(
-                1 for _, row in nba_stats.iterrows()
-                if get_player_injury_status(row["PLAYER_NAME"], injury_lookup)
-            )
-            print(f"  {len(injuries)} players on injury report, {injured_in_pool} in stats pool\n")
-
-        # Fetch schedule
-        schedule_game_counts = None
-        avg_games_per_week = 3.5
-        schedule_analysis = None
-        try:
-            from src.schedule_analyzer import (
-                fetch_nba_schedule, get_upcoming_weeks, build_schedule_analysis,
-            )
-            schedule = fetch_nba_schedule()
-            _wk0 = league_settings.get("current_week") if league_settings else None
-            weeks = get_upcoming_weeks(current_fantasy_week=_wk0, game_weeks=game_weeks)
-            schedule_analysis = build_schedule_analysis(schedule, weeks)
-            if schedule_analysis and schedule_analysis.get("weeks"):
-                schedule_game_counts = schedule_analysis["weeks"][0]["game_counts"]
-                avg_games_per_week = schedule_analysis["avg_games_per_week"]
-        except Exception as e:
-            print(f"  Warning: schedule analysis failed: {e}")
-
-        print("=" * 70)
-        print("TOP NBA PLAYERS BY 9-CATEGORY Z-SCORE VALUE")
-        print("(Yahoo Fantasy integration skipped)")
-        print("=" * 70)
-
-        # Use the full scoring pipeline (without team needs) to apply
-        # availability + injury + schedule multipliers
-        recommendations = score_available_players(
-            nba_stats, team_needs=None, recent_activity=None,
-            injury_lookup=injury_lookup,
-            schedule_game_counts=schedule_game_counts,
-            avg_games_per_week=avg_games_per_week,
-            schedule_analysis=schedule_analysis,
-        )
-        print(format_recommendations(recommendations, compact=compact))
+        # All stats now come from Yahoo Fantasy API — cannot skip.
+        print("ERROR: Stats are fetched via Yahoo Fantasy API. Cannot skip Yahoo.")
+        print("Remove --skip-yahoo or run normally.")
         return
 
     # ---------------------------------------------------------------
@@ -1178,7 +1171,7 @@ def run_waiver_analysis(
     # ---------------------------------------------------------------
     # STEP 2: Fetch NBA stats and compute z-scores
     # ---------------------------------------------------------------
-    nba_stats = build_player_stats_table()
+    nba_stats = build_player_stats_table(query)
     print(f"  Loaded stats for {len(nba_stats)} NBA players\n")
 
     # ---------------------------------------------------------------
@@ -1207,42 +1200,81 @@ def run_waiver_analysis(
     # Sort available players by raw Z_TOTAL to find top candidates
     available_stats = available_stats.sort_values("Z_TOTAL", ascending=False)
 
-    # Expand candidate pool when hot-pickup analysis is enabled so we
-    # don't miss breakout players who sit just outside the top 10 by
-    # season z-score but are surging in recent games.
     candidate_limit = config.DETAILED_LOG_LIMIT
-    if config.HOT_PICKUP_ENABLED:
-        candidate_limit = max(candidate_limit, config.TOP_N_RECOMMENDATIONS * 3)
 
-    top_candidate_ids = (
-        available_stats.head(candidate_limit)["PLAYER_ID"]
+    top_candidate_keys = (
+        available_stats.head(candidate_limit)["PLAYER_KEY"]
         .dropna()
-        .astype(int)
+        .astype(str)
         .tolist()
     )
 
     recent_activity = {}
-    if top_candidate_ids:
-        print(f"Checking recent game activity for top {len(top_candidate_ids)} candidates...")
-        recent_activity = check_recent_activity(top_candidate_ids)
+    if top_candidate_keys:
+        print(f"Checking recent game activity for top {len(top_candidate_keys)} candidates...")
+        recent_activity = check_recent_activity(
+            top_candidate_keys, query, stats_df=nba_stats
+        )
         active_count = sum(1 for v in recent_activity.values() if v.get("recent_flag") == "Active")
         inactive_count = sum(1 for v in recent_activity.values() if v.get("is_inactive"))
         print(f"  {active_count} active, {inactive_count} inactive/injured\n")
 
     # ---------------------------------------------------------------
-    # STEP 5a: Hot-pickup analysis (recent game breakout detection)
+    # STEP 5a: Hot-pickup analysis (ESPN boxscores → z-delta detection)
     # ---------------------------------------------------------------
+    # Fetch ESPN boxscores for the last 3 days.  This provides:
+    #   1. Full stat lines for hot-pickup z-delta (replaces Yahoo per-date)
+    #   2. Standout signals (waiver-calibrated thresholds)
+    #   3. Starter/bench flags (starting-tomorrow detection)
+    # Falls back to Yahoo per-date stats only if ESPN fails.
     hot_pickup_scores = None
-    if config.HOT_PICKUP_ENABLED and top_candidate_ids:
+    espn_boxscores = None  # shared with Step 5b-ii
+    if config.HOT_PICKUP_ENABLED and top_candidate_keys:
         try:
-            from src.nba_stats import compute_recent_game_stats, compute_hot_pickup_scores
-            print(f"Fetching recent game stats for hot-pickup analysis ({config.HOT_PICKUP_RECENT_GAMES} games)...")
-            recent_game_stats = compute_recent_game_stats(top_candidate_ids)
-            hot_pickup_scores = compute_hot_pickup_scores(recent_game_stats, nba_stats)
-            hot_count = sum(1 for v in hot_pickup_scores.values() if v.get("is_hot"))
-            print(f"  {len(recent_game_stats)} players evaluated, {hot_count} breaking out 🔥\n")
+            from src.player_news import (
+                fetch_espn_boxscores,
+                convert_boxscores_to_recent_stats,
+            )
+            candidate_names = available_stats.head(candidate_limit)["PLAYER_NAME"].tolist()
+            print(f"Fetching ESPN boxscores for hot-pickup analysis "
+                  f"({config.HOT_PICKUP_RECENT_GAMES} games, {len(candidate_names)} players)...")
+
+            espn_boxscores = fetch_espn_boxscores(
+                player_names=candidate_names,
+                days=config.HOT_PICKUP_RECENT_GAMES + 4,  # scan extra days to find enough games
+            )
+            print(f"  {espn_boxscores.api_calls} ESPN API calls, "
+                  f"{len(espn_boxscores.stat_lines)} players found in boxscores")
+
+            # Build name → player_key mapping for conversion
+            name_to_key: dict[str, str] = {}
+            for _, row in available_stats.head(candidate_limit).iterrows():
+                norm = normalize_name(row["PLAYER_NAME"])
+                name_to_key[norm] = str(row["PLAYER_KEY"])
+
+            recent_game_stats = convert_boxscores_to_recent_stats(
+                espn_boxscores, name_to_key,
+                last_n=config.HOT_PICKUP_RECENT_GAMES,
+            )
+            if recent_game_stats:
+                hot_pickup_scores = compute_hot_pickup_scores(recent_game_stats, nba_stats)
+                hot_count = sum(1 for v in hot_pickup_scores.values() if v.get("is_hot"))
+                print(f"  {len(recent_game_stats)} players evaluated via ESPN, "
+                      f"{hot_count} breaking out 🔥\n")
+            else:
+                print("  No ESPN stat lines matched candidates\n")
+
         except Exception as e:
-            print(f"  Warning: hot-pickup analysis failed: {e}\n")
+            print(f"  ESPN boxscore fetch failed ({e}), falling back to Yahoo...")
+            try:
+                hot_keys = top_candidate_keys[: config.DETAILED_LOG_LIMIT]
+                recent_game_stats = compute_recent_game_stats(hot_keys, query)
+                hot_pickup_scores = compute_hot_pickup_scores(recent_game_stats, nba_stats)
+                hot_count = sum(1 for v in hot_pickup_scores.values() if v.get("is_hot"))
+                print(f"  {len(recent_game_stats)} players evaluated via Yahoo, "
+                      f"{hot_count} breaking out 🔥\n")
+            except Exception as e2:
+                print(f"  Warning: hot-pickup analysis failed: {e2}\n")
 
     # ---------------------------------------------------------------
     # STEP 5a-ii: Yahoo trending/ownership data
@@ -1257,7 +1289,7 @@ def run_waiver_analysis(
             print(f"  Warning: trending data fetch failed: {e}\n")
 
     # ---------------------------------------------------------------
-    # STEP 5b: Fetch injury report from Basketball-Reference
+    # STEP 5b: Fetch injury report from ESPN
     # ---------------------------------------------------------------
     injury_lookup = {}
     if config.INJURY_REPORT_ENABLED:
@@ -1268,6 +1300,93 @@ def run_waiver_analysis(
             if get_player_injury_status(row["PLAYER_NAME"], injury_lookup)
         )
         print(f"  {len(injuries)} players on injury report, {injured_available} available but injured\n")
+
+    # ---------------------------------------------------------------
+    # STEP 5b-ii: Player news keyword analysis (ESPN blurbs + Yahoo notes)
+    # ---------------------------------------------------------------
+    player_news = None
+    try:
+        from src.player_news import (
+            analyze_player_news,
+            fetch_espn_player_news,
+            fetch_espn_boxscores,
+        )
+        candidate_names = available_stats.head(candidate_limit)["PLAYER_NAME"].tolist()
+
+        # Build Yahoo recent-notes lookup from DataFrame
+        yahoo_notes: dict[str, bool] = {}
+        if "HAS_RECENT_NOTES" in nba_stats.columns:
+            for _, row in nba_stats.iterrows():
+                if row.get("HAS_RECENT_NOTES"):
+                    yahoo_notes[normalize_name(row["PLAYER_NAME"])] = True
+
+        # Mine ESPN injury blurbs for performance keywords
+        player_news = analyze_player_news(
+            injury_lookup, player_names=candidate_names,
+            yahoo_notes=yahoo_notes,
+        )
+
+        # Also scan ESPN general news for non-injury signals
+        espn_news = fetch_espn_player_news(player_names=candidate_names)
+        for norm, info in espn_news.items():
+            if norm not in player_news:
+                player_news[norm] = info
+
+        # Use ESPN boxscore standout signals (already fetched in Step 5a)
+        # If boxscores weren't fetched yet, fetch them now
+        if espn_boxscores is None:
+            try:
+                espn_boxscores = fetch_espn_boxscores(
+                    player_names=candidate_names, days=3,
+                )
+            except Exception:
+                pass
+
+        if espn_boxscores is not None:
+            # Merge standout signals
+            for norm, info in espn_boxscores.standout_signals.items():
+                if norm in player_news:
+                    existing = player_news[norm]
+                    for lbl in info["news_labels"]:
+                        if lbl not in existing["news_labels"]:
+                            existing["news_labels"].append(lbl)
+                    existing["news_summary"] = ", ".join(existing["news_labels"])
+                    existing["news_multiplier"] = round(
+                        max(existing["news_multiplier"], info["news_multiplier"]), 3
+                    )
+                else:
+                    player_news[norm] = info
+
+            # Add "Recent Starter" signal for candidates who started
+            # their most recent game (strong indicator they'll start
+            # tomorrow too — relevant since pickups are for next day)
+            for norm, sinfo in espn_boxscores.starter_info.items():
+                if sinfo["started_last"] and sinfo["games_started"] >= 1:
+                    label = "Recent Starter"
+                    mult = 1.08
+                    if norm in player_news:
+                        existing = player_news[norm]
+                        if label not in existing["news_labels"]:
+                            existing["news_labels"].append(label)
+                            existing["news_summary"] = ", ".join(existing["news_labels"])
+                            existing["news_multiplier"] = round(
+                                max(existing["news_multiplier"], mult), 3
+                            )
+                    else:
+                        player_news[norm] = {
+                            "news_multiplier": mult,
+                            "news_labels": [label],
+                            "news_summary": label,
+                            "has_yahoo_notes": False,
+                        }
+
+        if player_news:
+            print(f"  {len(player_news)} players with news signals")
+            for norm, info in list(player_news.items())[:5]:
+                print(f"    {norm}: {info['news_summary']} (x{info['news_multiplier']:.2f})")
+            print()
+    except Exception as e:
+        print(f"  Warning: player news analysis failed: {e}\n")
 
     # ---------------------------------------------------------------
     # STEP 5c: Fetch upcoming NBA schedule
@@ -1294,7 +1413,7 @@ def run_waiver_analysis(
     # ---------------------------------------------------------------
     # STEP 6: Rank available players by need-weighted, schedule-adjusted score
     # ---------------------------------------------------------------
-    print("Ranking available players (need + availability + injury + schedule + hot-pickup adjusted)...")
+    print("Ranking available players (need + availability + injury + schedule + news + hot-pickup adjusted)...")
     recommendations = score_available_players(
         available_stats, team_needs, recent_activity, injury_lookup,
         schedule_game_counts=schedule_game_counts,
@@ -1302,6 +1421,7 @@ def run_waiver_analysis(
         schedule_analysis=schedule_analysis,
         hot_pickup_scores=hot_pickup_scores,
         trending_data=trending_data,
+        player_news=player_news,
     )
     print(format_recommendations(recommendations, compact=compact))
 
