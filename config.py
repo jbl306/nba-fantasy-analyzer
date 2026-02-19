@@ -87,7 +87,7 @@ IL_PLUS_ELIGIBLE_STATUSES = {"INJ", "O", "GTD", "DTD", "SUSP"}
 # and move the IL player to bench (roster upgrade, saves a transaction).
 IL_SMART_DROP_Z_THRESHOLD = 0.5
 
-# nba_api settings
+# General settings
 # Number of recent games to evaluate player performance
 RECENT_GAMES_WINDOW = 14  # last 14 days
 TOP_N_RECOMMENDATIONS = 15  # number of waiver recommendations to show

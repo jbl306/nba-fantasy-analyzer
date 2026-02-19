@@ -6,7 +6,7 @@ upcoming game count. Players on teams with more games provide more
 stat production opportunities.
 
 Data source: NBA.com CDN schedule JSON
-Fallback:    nba_api scoreboardv2 per-day lookup
+Fallback:    ESPN scoreboard per-day lookup (no auth required)
 """
 
 from __future__ import annotations
@@ -17,8 +17,6 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 import requests
-from nba_api.stats.endpoints import scoreboardv2
-from nba_api.stats.static import teams as nba_teams
 from tabulate import tabulate
 
 import config
@@ -112,39 +110,51 @@ def fetch_nba_schedule() -> list[dict]:
         return []
 
 
+# ESPN scoreboard URL for per-day schedule fallback
+_ESPN_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+)
+
+
 def _fetch_schedule_per_day(
     start_date: date,
     end_date: date,
 ) -> list[dict]:
-    """Fallback: use nba_api scoreboardv2 to get games per day."""
-    # Build team-ID → abbreviation mapping
-    team_map: dict[int, str] = {}
-    for t in nba_teams.get_teams():
-        team_map[t["id"]] = t["abbreviation"]
+    """Fallback: use ESPN public scoreboard to get games per day.
 
+    No authentication or third-party packages required.
+    """
     games: list[dict] = []
     current = start_date
     while current <= end_date:
         try:
-            board = scoreboardv2.ScoreboardV2(
-                game_date=current.strftime("%Y-%m-%d"),
-                timeout=30,
+            resp = requests.get(
+                _ESPN_SCOREBOARD_URL,
+                params={"dates": current.strftime("%Y%m%d")},
+                timeout=15,
             )
-            time.sleep(0.6)
-            headers_df = board.get_data_frames()[0]
-
-            for _, row in headers_df.iterrows():
-                home_id = row.get("HOME_TEAM_ID")
-                away_id = row.get("VISITOR_TEAM_ID")
-                home_abbr = team_map.get(home_id, "")
-                away_abbr = team_map.get(away_id, "")
-                if home_abbr and away_abbr:
+            resp.raise_for_status()
+            data = resp.json()
+            for event in data.get("events", []):
+                competitors = event.get("competitions", [{}])[0].get(
+                    "competitors", []
+                )
+                teams = {}
+                for comp in competitors:
+                    ha = comp.get("homeAway", "")
+                    abbr = comp.get("team", {}).get("abbreviation", "")
+                    if ha and abbr:
+                        teams[ha] = abbr
+                home = teams.get("home", "")
+                away = teams.get("away", "")
+                if home and away:
                     games.append({
                         "game_date": current,
-                        "home_team": home_abbr,
-                        "away_team": away_abbr,
-                        "game_id": str(row.get("GAME_ID", "")),
+                        "home_team": home,
+                        "away_team": away,
+                        "game_id": event.get("id", ""),
                     })
+            time.sleep(0.3)
         except Exception:
             pass
         current += timedelta(days=1)

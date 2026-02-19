@@ -77,12 +77,11 @@ pip install -r requirements.txt
 ```
 
 Required packages:
-- `nba_api` — NBA.com stats API wrapper
 - `yfpy` — Yahoo Fantasy Sports API wrapper
 - `pandas` — Data manipulation
 - `python-dotenv` — .env file loading
 - `tabulate` — Pretty table output
-- `requests` — HTTP client (ESPN injury API, etc.)
+- `requests` — HTTP client (ESPN APIs, NBA.com CDN)
 
 ---
 
@@ -375,6 +374,6 @@ python main.py
 - Verify your league ID and team ID are correct in `.env`
 - Try `--skip-yahoo` to confirm NBA stats are loading
 
-### Rate limiting from nba_api
+### ESPN API issues
 
-The NBA.com API can be rate-limited. The tool adds small delays between requests. If you encounter errors, wait a few minutes and retry.
+The ESPN public APIs require no authentication and have generous rate limits. If requests fail, check your network connection and retry. The tool adds small delays between requests automatically.

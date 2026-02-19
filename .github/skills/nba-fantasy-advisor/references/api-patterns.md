@@ -2,23 +2,20 @@
 
 ## External API Dependencies
 
-### NBA.com (nba_api)
+### ESPN Public APIs
 
-- **Stats endpoint**: `LeagueDashPlayerStats` — per-game averages for all players
-- **Game logs**: `PlayerGameLog` — recent game-by-game stats
-- **Schedule**: `cdn.nba.com/static/json/staticData/scheduleLeagueV2.json`
-- **Fallback**: `ScoreboardV2` if CDN schedule unavailable
+- **Injuries**: `site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries` — player injury reports with blurbs
+- **News**: `site.api.espn.com/apis/site/v2/sports/basketball/nba/news?limit=25` — general NBA news articles
+- **Scoreboard**: `site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=YYYYMMDD` — daily game list
+- **Game Summary**: `site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event={id}` — full boxscores with starter flags
 - **Auth**: None required
-- **Rate limiting**: Respect 1-2 second delays between `nba_api` calls
-- **Headers**: `nba_api` requires a valid `Referer` and `User-Agent`
+- **Rate limiting**: Generous — small delays added between calls as a courtesy
 
-### ESPN Injury API
+### NBA.com CDN
 
-- **Endpoint**: `site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries`
+- **Schedule**: `cdn.nba.com/static/json/staticData/scheduleLeagueV2.json` — full-season schedule
 - **Auth**: None required
-- **Format**: JSON array of teams with nested athlete injury entries
-- **Key fields**: `athlete.displayName`, `status` (Out, Day-To-Day), `details.detail`
-- **Failure mode**: Returns empty gracefully — analysis continues without injury data
+- **Fallback**: ESPN scoreboard per-day lookup if CDN unavailable
 
 ### Yahoo Fantasy API (yfpy)
 
@@ -40,7 +37,6 @@
 | Code | Source | Meaning | Handling |
 |------|--------|---------|----------|
 | 401 | Yahoo | Token expired | Auto-retry with re-auth (up to 3x) |
-| 403 | NBA.com | Rate limited | Wait and retry |
 | 404 | Yahoo | Invalid league/team ID | Check config |
 | 500 | ESPN | Server error | Graceful fallback (skip injury data) |
 
@@ -60,8 +56,9 @@ for attempt in range(max_retries):
 ## Data Flow
 
 ```
-NBA.com Stats → Z-Scores → ┐
-ESPN Injuries → Multipliers → ├→ Waiver Advisor → Ranked Recommendations
+Yahoo Stats   → Z-Scores → ┐
+ESPN Boxscores→ Hot Pickup → ├→ Waiver Advisor → Ranked Recommendations
+ESPN Injuries → Multipliers → ┤
 Yahoo Rosters → Owned Set   → ┤
 NBA Schedule  → Game Density → ┘
 ```

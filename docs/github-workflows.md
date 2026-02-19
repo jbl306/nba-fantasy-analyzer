@@ -1,17 +1,11 @@
 # GitHub Actions Workflows
 
-The advisor ships with two GitHub Actions workflows that run automatically in the cloud — no laptop required. Both send results via email and can also be triggered manually from the GitHub Actions tab at any time.
+The advisor ships with two GitHub Actions workflows that run in the cloud — no laptop required.
 
----
-
-## Overview
-
-| Workflow | File | Auto Schedule | Manual | Command | Email Subject |
-|----------|------|--------------|--------|---------|---------------|
-| Nightly Waiver Report | `nightly-watch.yml` | 11:00 PM ET daily | ✅ | `--watch` | 🏀 Waiver Wire Report |
-| Daily Streaming Picks | `daily-stream.yml` | 12:30 AM ET daily | ✅ | `--stream --watch` | 🏀 Streaming Picks |
-
-Both workflow files live in `.github/workflows/`.
+| Workflow | Purpose |
+|----------|---------|
+| **Nightly Waiver Report** | Automated nightly run for the repo owner’s team |
+| **League Advisor** | On-demand run for any league member (pick your team) |
 
 ---
 
@@ -36,23 +30,33 @@ git remote add origin https://github.com/your-username/nba-fantasy-advisor.git
 git push -u origin v2
 ```
 
-### 3. Add GitHub Secrets
+### 3. Add GitHub Secrets & Variables
 
-Go to your repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
+Go to your repo → **Settings** → **Secrets and variables** → **Actions**.
 
-Add each of the following:
+#### Secrets
+
+Click **New repository secret** and add each of the following:
 
 | Secret Name | Where to get it |
 |-------------|----------------|
 | `YAHOO_CONSUMER_KEY` | Your Yahoo Developer App |
 | `YAHOO_CONSUMER_SECRET` | Your Yahoo Developer App |
-| `YAHOO_LEAGUE_ID` | Your league URL, or `--list-leagues` output |
-| `YAHOO_TEAM_ID` | Your team URL, or `--list-teams` output |
 | `YAHOO_ACCESS_TOKEN` | Your `.env` file after local OAuth run |
 | `YAHOO_REFRESH_TOKEN` | Your `.env` file after local OAuth run |
 | `YAHOO_TOKEN_TYPE` | Your `.env` file — usually `bearer` |
-| `NOTIFY_EMAIL_TO` | Your Gmail address |
 | `NOTIFY_SMTP_PASSWORD` | Gmail App Password (see below) |
+
+#### Variables
+
+Switch to the **Variables** tab and add:
+
+| Variable Name | Value |
+|---------------|-------|
+| `YAHOO_LEAGUE_ID` | Your league ID (from `--list-leagues` output) |
+| `NOTIFY_EMAIL_FROM` | Your Gmail address (the one with the App Password) |
+
+`NOTIFY_EMAIL_FROM` is used by both workflows as the SMTP sender. For the League Advisor, league members type their own email in the workflow input — the report is sent from your account to their address.
 
 **Gmail App Password setup:**
 1. Enable 2-Factor Authentication on your Google account
@@ -64,7 +68,7 @@ Add each of the following:
 
 Go to the **Actions** tab in your GitHub repo. If workflows are disabled, click **"I understand my workflows, go ahead and enable them"**.
 
-Both workflows will now run on their automatic schedules and are available for manual dispatch.
+The Nightly Waiver Report will run on its automatic schedule; the League Advisor is always available for manual dispatch.
 
 ---
 
@@ -114,63 +118,59 @@ Useful for mid-week checks or after a major injury news.
 
 ---
 
-## Workflow 2 — Daily Streaming Picks
-
-**File:** `.github/workflows/daily-stream.yml`
-
-Finds the best available player with a game **tomorrow** and emails streaming recommendations. Designed for overnight FAAB auction leagues where same-day pickups are not possible.
-
-### Schedule
-
-| Time Zone | Time |
-|-----------|------|
-| ET (EST) | 12:30 AM |
-| ET (EDT) | 12:30 AM (04:30 UTC) |
-| UTC | 05:30 |
-
-Running after midnight allows overnight FAAB processing — the streaming picks target tomorrow's game slate so your claims are ready for the next day.
-
-### What it does
-
-1. Checks out the repo and installs dependencies
-2. Builds a `.env` from GitHub Secrets
-3. Runs `python main.py --stream --watch`:
-   - Fetches tomorrow's NBA schedule
-   - Filters the waiver pool to only players on teams playing tomorrow
-   - Checks IL/IL+ compliance and evaluates smart drop strategies
-   - Ranks candidates against your roster's weakest spot
-   - Sends an HTML email with tomorrow's best streaming pickups
-4. Uploads CSV output as a run artifact (kept 7 days)
-
-### Email format
-
-Subject: **🏀 Streaming Picks — Feb 18**
-
-The email includes:
-- Ranked table of available players with games tomorrow
-- IL/IL+ action banner (if applicable) — activate a recovered IL player or drop to clear violation
-- Roster impact preview for the top pick
-- Injury and z-score context
-
-### Manual trigger
-
-The most common use case — trigger it manually during the day when you want to make a streaming add:
-
-1. Go to **Actions** → **Daily Streaming Picks**
-2. Click **Run workflow** → **Run workflow**
-3. Check your email in ~2 minutes
-
----
-
 ## Artifacts
 
-Both workflows upload their CSV outputs as run artifacts. To access them:
+Both workflows upload their outputs as run artifacts. To access them:
 
 1. Go to **Actions** → click a completed run
 2. Scroll to **Artifacts** at the bottom
-3. Download `waiver-report-N` or `streaming-report-N`
+3. Download `waiver-report-N` or `waiver-report-team-N`
 
 Artifacts are kept for **7 days** before automatic deletion.
+
+---
+
+## Workflow 2 — League Advisor (on-demand, any team)
+
+**File:** `.github/workflows/league-advisor.yml`
+
+An on-demand workflow any league member can use. Pick your team from a dropdown, optionally enter an email address, and get a personalised waiver report. League members don’t need to configure any secrets — the email is sent from the repo owner’s Gmail using the `NOTIFY_EMAIL_FROM` variable and `NOTIFY_SMTP_PASSWORD` secret already configured above.
+
+### Inputs
+
+| Input | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| **team** | choice | ✅ | — | Your fantasy team (see reference table below) |
+| **top_n** | string | ❌ | `10` | Number of recommendations |
+| **email** | string | ❌ | — | Email address to receive the report (leave blank to skip) |
+
+### How to use
+
+1. Go to **Actions** → **League Advisor (pick your team)**
+2. Click **Run workflow**
+3. Select your team from the dropdown
+4. Optionally enter your email address
+5. Click **Run workflow**
+6. When complete, download the artifact or check your inbox
+
+### Team Reference Table
+
+| ID | Team Name |
+|----|-----------|
+| 1 | the profeshunals |
+| 2 | RAYNAUD's phenomenon |
+| 3 | MeLO iN ThE TrAp |
+| 4 | Dabham |
+| 5 | Cool Cats |
+| 6 | Rookie |
+| 7 | Da Young OG |
+| 8 | Old School Legends |
+| 9 | jbl |
+| 10 | Tanking for tanking's sake |
+| 11 | Big Kalk |
+| 12 | Kailash Gupta's Boss Team |
+
+> **Note:** Team names may change during the season. Run `python main.py --list-teams` locally to see the current names, or check the dropdown in the workflow dispatch UI.
 
 ---
 
@@ -200,14 +200,12 @@ Check that the YAML files exist on the branch GitHub is tracking and that workfl
 
 ### Running locally to test
 
-Both commands work interactively on your machine:
-
 ```bash
-# Test nightly report
+# Test nightly report (your team)
 python main.py --watch
 
-# Test streaming picks
-python main.py --stream --watch
+# Test for another team
+python main.py --team 3 --watch
 ```
 
 These use your local `.env` and are the fastest way to verify email delivery before relying on the scheduled runs.
