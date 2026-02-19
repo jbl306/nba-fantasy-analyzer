@@ -46,7 +46,7 @@ permissions:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -83,13 +83,7 @@ jobs:
           sed -i 's|OUTPUT_DIR = .*|OUTPUT_DIR = Path("outputs")|' config.py
 
       - name: Run watch analysis
-        run: python main.py --watch
-        timeout-minutes: 10
-
-      - name: Upload output artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: waiver-report-${{ github.run_number }}
-          path: outputs/
-          retention-days: 7
+        run: python -u main.py --watch
+        timeout-minutes: 14
+        env:
+          PYTHONUNBUFFERED: "1"

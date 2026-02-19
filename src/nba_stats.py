@@ -23,33 +23,28 @@ import config
 
 
 # ---------------------------------------------------------------------------
-# Browser-like headers for stats.nba.com
-# stats.nba.com aggressively throttles / blocks datacenter IPs (GitHub
-# Actions, AWS, etc.) unless the request looks like it comes from a real
-# browser visiting nba.com.  The critical headers are Referer and Origin.
+# Patch nba_api's default headers for datacenter compatibility
+#
+# stats.nba.com aggressively throttles datacenter IPs (GitHub Actions, AWS,
+# etc.) unless the request looks like it originates from the NBA.com website.
+# The library already ships good defaults (Chrome UA, Sec-Ch-Ua, etc.) but
+# its Referer points at stats.nba.com — the API wants www.nba.com instead.
+# We patch the *existing* defaults so every call benefits automatically
+# without needing to pass headers= each time.
 # ---------------------------------------------------------------------------
+try:
+    from nba_api.stats.library.http import STATS_HEADERS as _STATS_HEADERS
+except ImportError:
+    _STATS_HEADERS = {}  # safety net for future nba_api versions
 
-_BROWSER_HEADERS = {
-    "Host": "stats.nba.com",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "x-nba-stats-origin": "stats",
-    "x-nba-stats-token": "true",
+_STATS_HEADERS.update({
     "Referer": "https://www.nba.com/",
     "Origin": "https://www.nba.com",
-    "Connection": "keep-alive",
-    "Sec-Fetch-Dest": "empty",
+    "x-nba-stats-origin": "stats",
+    "x-nba-stats-token": "true",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site",
-    "Pragma": "no-cache",
-    "Cache-Control": "no-cache",
-}
+})
 
 # Retriable keywords — if any appear in the exception message, the call
 # is retried rather than immediately re-raised.
@@ -63,17 +58,19 @@ _RETRIABLE_KEYWORDS = frozenset([
 # Retry helper for nba_api calls (stats.nba.com throttles datacenter IPs)
 # ---------------------------------------------------------------------------
 
-def _nba_api_call(fn, *args, retries: int = 3, base_timeout: int = 120, **kwargs):
+def _nba_api_call(fn, *args, retries: int = 3, base_timeout: int = 45, **kwargs):
     """Call an nba_api endpoint constructor with retry + exponential backoff.
 
     stats.nba.com frequently times out from cloud hosts (GitHub Actions, etc.).
     This wrapper:
-    * Injects browser-like request headers so the API doesn't reject the call.
+    * Uses the patched global headers (Referer/Origin set to www.nba.com).
     * Optionally routes through a proxy (set ``NBA_API_PROXY`` env var).
-    * Retries with increasing timeouts (120 s → 240 s → 360 s) and a backoff
+    * Retries with increasing timeouts (45 s → 90 s → 135 s) and a backoff
       delay between attempts.
     * Catches **any** exception whose message looks network/timeout-related,
       regardless of how urllib3 / requests / ssl wraps it.
+
+    Worst-case budget per call: 45 + 3 + 90 + 6 + 135 = ~280 s ≈ 4.5 min.
 
     Args:
         fn: The nba_api endpoint class (e.g., ``leaguedashplayerstats.LeagueDashPlayerStats``).
@@ -85,9 +82,6 @@ def _nba_api_call(fn, *args, retries: int = 3, base_timeout: int = 120, **kwargs
     Returns:
         The constructed endpoint object (call ``.get_data_frames()`` on it).
     """
-    # Inject browser headers (nba_api replaces defaults when headers= is set)
-    kwargs.setdefault("headers", _BROWSER_HEADERS)
-
     # Optional proxy (e.g. "http://user:pass@proxy:8080")
     proxy = os.environ.get("NBA_API_PROXY")
     if proxy:
@@ -107,7 +101,7 @@ def _nba_api_call(fn, *args, retries: int = 3, base_timeout: int = 120, **kwargs
                 raise  # programming error, bad params, etc. — don't retry
             last_exc = exc
             if attempt < retries:
-                wait = 5 * attempt
+                wait = 3 * attempt
                 print(
                     f"    ⚠ stats.nba.com error (attempt {attempt}/{retries}): "
                     f"{type(exc).__name__} — retrying in {wait}s with "
