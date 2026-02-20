@@ -85,6 +85,7 @@ jobs:
           YAHOO_GAME_CODE=nba
           YAHOO_ACCESS_TOKEN=${{ secrets.YAHOO_ACCESS_TOKEN }}
           YAHOO_REFRESH_TOKEN=${{ secrets.YAHOO_REFRESH_TOKEN }}
+          YAHOO_TOKEN_TIME=${{ secrets.YAHOO_TOKEN_TIME }}
           YAHOO_TOKEN_TYPE=${{ secrets.YAHOO_TOKEN_TYPE }}
           NOTIFY_EMAIL_TO=${{ inputs.email }}
           NOTIFY_EMAIL_FROM=${{ vars.NOTIFY_EMAIL_FROM }}
