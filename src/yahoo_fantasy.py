@@ -16,6 +16,7 @@ import config
 
 _AUTH_RETRIES = 3
 _AUTH_BACKOFF = 1.0  # seconds; doubles each retry
+_AUTH_ERROR_PHRASES = ("logged in", "token_expired", "invalid_token", "oauth_problem")
 
 
 def _patch_get_response(query: YahooFantasySportsQuery) -> None:
@@ -49,7 +50,8 @@ def _patch_get_response(query: YahooFantasySportsQuery) -> None:
                 result = _original(url)
                 return result
             except Exception as exc:
-                if "logged in" not in str(exc).lower():
+                exc_lower = str(exc).lower()
+                if not any(phrase in exc_lower for phrase in _AUTH_ERROR_PHRASES):
                     # Not an auth error — restore logging and re-raise
                     _yfpy_logger.setLevel(prev_level)
                     raise
@@ -57,7 +59,7 @@ def _patch_get_response(query: YahooFantasySportsQuery) -> None:
                 wait = _AUTH_BACKOFF * (attempt + 1)
                 if attempt == 0:
                     print(
-                        f"  Yahoo auth expired — refreshing token "
+                        f"  Yahoo auth error ({type(exc).__name__}) — refreshing token "
                         f"(retry {attempt + 1}/{_AUTH_RETRIES})…"
                     )
                 time.sleep(wait)
