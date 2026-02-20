@@ -95,15 +95,15 @@ def create_yahoo_query() -> YahooFantasySportsQuery:
         save_token_data_to_env_file=True,
     )
 
+    # Apply retry/refresh patch BEFORE first API call so expired tokens
+    # are handled transparently.
+    _patch_get_response(query)
+
     # Auto-resolve game_id for the current season so it never goes stale.
     game_info = query.get_current_game_info()
     query.game_id = game_info.game_id
 
     yfpy_logger.setLevel(prev_level)
-
-    # Work around yfpy bug: on 401 it refreshes the token but doesn't
-    # retry the request, so the caller sees "You must be logged in".
-    _patch_get_response(query)
 
     return query
 
