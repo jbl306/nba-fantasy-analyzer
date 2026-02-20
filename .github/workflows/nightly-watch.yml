@@ -48,6 +48,8 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TZ: America/New_York
 
     steps:
       - name: Checkout repository

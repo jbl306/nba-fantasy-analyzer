@@ -24,6 +24,9 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
+
+_EST = ZoneInfo("America/New_York")
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -76,7 +79,7 @@ def _format_html_report(
     team_name: str = "",
 ) -> str:
     """Build an HTML email body from the recommendation DataFrame."""
-    now = datetime.now().strftime("%A %B %d, %Y at %I:%M %p")
+    now = datetime.now(_EST).strftime("%A %B %d, %Y at %I:%M %p")
     rows = rec_df.head(top_n)
 
     team_label = f" — {team_name}" if team_name else ""
@@ -236,7 +239,7 @@ def _format_plain_report(
     team_name: str = "",
 ) -> str:
     """Build a plain-text fallback for the email."""
-    now = datetime.now().strftime("%A %B %d, %Y at %I:%M %p")
+    now = datetime.now(_EST).strftime("%A %B %d, %Y at %I:%M %p")
     team_label = f" ({team_name})" if team_name else ""
     lines = [
         f"NBA Fantasy Advisor - Waiver Wire Report{team_label}",
@@ -292,7 +295,7 @@ def send_email_report(
     html_body = _format_html_report(rec_df, schedule_analysis, top_n, mode=mode, il_action=il_action, team_name=team_name)
     text_body = _format_plain_report(rec_df, top_n, team_name=team_name)
 
-    now = datetime.now().strftime("%b %d")
+    now = datetime.now(_EST).strftime("%b %d")
     team_suffix = f" [{team_name}]" if team_name else ""
     if mode == "stream":
         subject = f"🏀 Streaming Picks — {now}{team_suffix}"
