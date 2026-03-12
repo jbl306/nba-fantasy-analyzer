@@ -1,17 +1,8 @@
 ---
 name: nba-fantasy-advisor
-description: >
-  NBA Fantasy Basketball waiver wire advisor with 9-category z-score analysis,
-  FAAB bid suggestions, and automated Yahoo transaction submission.
-  Use when user asks to "analyze my fantasy roster", "find waiver pickups",
-  "suggest FAAB bids", "submit a waiver claim", "check injury reports",
-  "analyze NBA schedule", "run fantasy analysis", "who should I pick up",
-  or "optimize my fantasy basketball team".
+description: NBA Fantasy Basketball waiver wire advisor with 9-category z-score analysis, FAAB bid suggestions, and automated Yahoo transaction submission. Use when user asks to analyze my fantasy roster, find waiver pickups, suggest FAAB bids, submit a waiver claim, check injury reports, analyze NBA schedule, run fantasy analysis, who should I pick up, or optimize my fantasy basketball team.
 license: Apache-2.0
-compatibility: >
-  Requires Python 3.10+, Google Chrome (for Yahoo OAuth browser flow),
-  and network access to NBA.com, ESPN, and Yahoo Fantasy APIs.
-  Yahoo OAuth2 credentials required for roster/transaction features.
+compatibility: Requires Python 3.10+, Google Chrome (for Yahoo OAuth browser flow), and network access to NBA.com, ESPN, and Yahoo Fantasy APIs. Yahoo OAuth2 credentials required for roster/transaction features.
 metadata:
   author: Joshua Lee
   version: 2.0.0
